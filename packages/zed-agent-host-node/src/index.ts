@@ -14,7 +14,7 @@
  * ```
  */
 
-import type { BackendHost, EventSink } from '@anthropic/zed-agent-core';
+import type { BackendHost, EventSink, WebSearchProvider } from '@anthropic/zed-agent-core';
 import { NodeFileSystem, type NodeFileSystemOptions } from './file-system.js';
 import { NodeTerminalProvider } from './terminal.js';
 import { NodeProjectInfo, type NodeProjectInfoOptions } from './project-info.js';
@@ -30,6 +30,8 @@ export interface NodeHostOptions extends NodeProjectInfoOptions {
   permissionOptions?: NodePermissionHandlerOptions;
   /** Default shell path. */
   shell?: string;
+  /** Web search provider (enables the web_search tool). */
+  webSearch?: WebSearchProvider;
 }
 
 /**
@@ -48,6 +50,7 @@ export function createNodeHost(options: NodeHostOptions): BackendHost {
     permissions: new NodePermissionHandler(options.permissionOptions),
     events: options.eventSink,
     http: new NodeHttpClient(),
+    webSearch: options.webSearch,
   };
 }
 
@@ -60,3 +63,6 @@ export type { NodeProjectInfoOptions } from './project-info.js';
 export { NodePermissionHandler } from './permissions.js';
 export type { NodePermissionHandlerOptions } from './permissions.js';
 export { NodeHttpClient } from './http-client.js';
+
+// Web search providers
+export { TavilySearchProvider, SearxNGSearchProvider, BasicSearchProvider } from './web-search.js';

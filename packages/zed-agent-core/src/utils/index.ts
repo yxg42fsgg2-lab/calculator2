@@ -10,3 +10,6 @@ export {
   markdownEscape,
   codeblockTag,
 } from './markdown.js';
+
+export { ActionLog } from './action-log.js';
+export type { ActionLogEntry, ActionType } from './action-log.js';

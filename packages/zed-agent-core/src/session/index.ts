@@ -12,3 +12,5 @@ export {
   defaultSettings,
 } from './settings-loader.js';
 export type { AgentConfigFile } from './settings-loader.js';
+
+export { createMinimalHost } from './minimal-host.js';

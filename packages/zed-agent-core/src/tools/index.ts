@@ -68,6 +68,9 @@ export type { OpenToolInput } from './open-tool.js';
 export { SubagentTool } from './subagent-tool.js';
 export type { SubagentToolInput, SubagentToolConfig } from './subagent-tool.js';
 
+export { StreamingEditFileTool } from './streaming-edit-file-tool.js';
+export type { StreamingEditFileToolInput, StreamingEditFileMode, StreamingEditPair } from './streaming-edit-file-tool.js';
+
 // --- Factory function ---
 
 import type { AnyAgentTool } from '../types/tools.js';

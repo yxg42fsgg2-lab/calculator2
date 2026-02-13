@@ -66,3 +66,11 @@ export {
   VERCEL_PROVIDER_ID,
   VERCEL_PROVIDER_NAME,
 } from './vercel.js';
+
+// Zed Cloud
+export {
+  ZedCloudProvider,
+  ZED_CLOUD_PROVIDER_ID,
+  ZED_CLOUD_PROVIDER_NAME,
+} from './zed-cloud.js';
+export type { ZedCloudProviderOptions } from './zed-cloud.js';

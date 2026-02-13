@@ -4,6 +4,14 @@
  */
 
 export { ToolRegistry } from './tool-registry.js';
+export { ContextServerRegistry } from './context-server-registry.js';
+export type {
+  ContextServerId,
+  McpToolDefinition,
+  McpPromptDefinition,
+  McpServerInfo,
+  McpToolExecutor,
+} from './context-server-registry.js';
 
 // Individual tools
 export { NowTool } from './now-tool.js';

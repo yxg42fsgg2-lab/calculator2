@@ -31,14 +31,16 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "handlebars": "^4.7.8",
+    "@anthropic-ai/sdk": "^0.74.0",
     "eventemitter3": "^5.0.1",
+    "handlebars": "^4.7.8",
+    "openai": "^6.21.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
+    "@types/uuid": "^9.0.0",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
-    "@types/uuid": "^9.0.0"
+    "vitest": "^2.0.0"
   },
   "license": "GPL-3.0-or-later"
 }

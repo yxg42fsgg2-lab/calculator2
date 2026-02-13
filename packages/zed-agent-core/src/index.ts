@@ -27,3 +27,6 @@
 
 // Re-export all types
 export * from './types/index.js';
+
+// Re-export models
+export * from './models/index.js';

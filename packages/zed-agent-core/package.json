@@ -1,0 +1,97 @@
+{
+  "name": "@anthropic/zed-agent-core",
+  "version": "0.1.0",
+  "description": "Zed's AI coding agent backend — pluggable, framework-agnostic, complete 1:1 port",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    },
+    "./models": {
+      "types": "./dist/models/index.d.ts",
+      "import": "./dist/models/index.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "import": "./dist/tools/index.js"
+    },
+    "./thread": {
+      "types": "./dist/thread/index.d.ts",
+      "import": "./dist/thread/index.js"
+    },
+    "./edit-agent": {
+      "types": "./dist/edit-agent/index.d.ts",
+      "import": "./dist/edit-agent/index.js"
+    },
+    "./session": {
+      "types": "./dist/session/index.d.ts",
+      "import": "./dist/session/index.js"
+    },
+    "./templates": {
+      "types": "./dist/templates/index.d.ts",
+      "import": "./dist/templates/index.js"
+    },
+    "./permissions": {
+      "types": "./dist/permissions/index.d.ts",
+      "import": "./dist/permissions/index.js"
+    },
+    "./persistence": {
+      "types": "./dist/persistence/index.d.ts",
+      "import": "./dist/persistence/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
+    "better-sqlite3": "^12.6.2",
+    "eventemitter3": "^5.0.1",
+    "handlebars": "^4.7.8",
+    "openai": "^6.21.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/uuid": "^9.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "zed",
+    "agent",
+    "ai",
+    "coding",
+    "llm",
+    "tools",
+    "anthropic",
+    "openai",
+    "agentic"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zed-industries/zed",
+    "directory": "packages/zed-agent-core"
+  },
+  "license": "GPL-3.0-or-later"
+}

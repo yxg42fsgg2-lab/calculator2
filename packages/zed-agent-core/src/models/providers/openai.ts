@@ -150,6 +150,29 @@ export class OpenAILanguageModel implements LanguageModel {
     return this.client.apiKey ?? undefined;
   }
 
+  /**
+   * Rough token count estimation for OpenAI models.
+   * Uses the ~4 characters per token heuristic.
+   * For accurate counting, use tiktoken (npm package).
+   */
+  async countTokens(request: LanguageModelRequest): Promise<number> {
+    let charCount = 0;
+    for (const msg of request.messages) {
+      charCount += 4; // Per-message overhead
+      for (const content of msg.content) {
+        if (content.type === 'text') charCount += content.text.length;
+        else if (content.type === 'tool_use') charCount += JSON.stringify(content.toolUse.input).length;
+        else if (content.type === 'tool_result' && content.toolResult.content.type === 'text') {
+          charCount += content.toolResult.content.text.length;
+        }
+      }
+    }
+    for (const tool of request.tools) {
+      charCount += tool.name.length + tool.description.length + JSON.stringify(tool.inputSchema).length;
+    }
+    return Math.ceil(charCount / 4);
+  }
+
   async *streamCompletion(
     request: LanguageModelRequest,
   ): AsyncIterable<LanguageModelCompletionEvent> {

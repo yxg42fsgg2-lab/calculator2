@@ -19,6 +19,7 @@ import { Thread, type ThreadOptions } from '../thread/thread.js';
 import { createDefaultTools } from '../tools/index.js';
 import { EditFileTool } from '../tools/edit-file-tool.js';
 import { SubagentTool } from '../tools/subagent-tool.js';
+import { importThread as doImportThread } from '../thread/export.js';
 import { buildSystemPrompt, systemPromptDataFromHost } from '../templates/system-prompt.js';
 import { ThreadsDatabase } from '../persistence/threads-database.js';
 import type { BackendHost } from '../types/host.js';
@@ -26,6 +27,7 @@ import type { AgentSettings } from '../types/settings.js';
 import type { SessionId } from '../types/branded.js';
 import { agentProfileId } from '../types/branded.js';
 import type { StopReason, UserMessageContent, DbThreadMetadata } from '../types/index.js';
+import { emptyTokenUsage } from '../types/language-model.js';
 import { eraseToolType } from '../types/tools.js';
 
 // ---------------------------------------------------------------------------
@@ -421,6 +423,54 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
       ? this.getThread(threadId)
       : this.activeThread;
     thread?.cancel();
+  }
+
+  /**
+   * Import a thread from a ThreadExport (shared conversation).
+   * Ported from: legacy_thread.rs import logic
+   *
+   * The imported thread becomes a new thread in the session that can
+   * be continued with new messages.
+   */
+  importThread(data: import('../thread/export.js').ThreadExport): Thread {
+    const imported = doImportThread(data);
+
+    const thread = Thread.fromDb(
+      imported.id,
+      {
+        title: imported.title,
+        messages: imported.messages,
+        updatedAt: new Date().toISOString(),
+        cumulativeTokenUsage: emptyTokenUsage(),
+        requestTokenUsage: new Map(),
+        imported: true,
+      },
+      {
+        host: this.host,
+        settings: this.settings,
+        model: this.model,
+        systemPromptBuilder: this.buildSystemPrompt.bind(this),
+      },
+    );
+
+    // Register tools
+    for (const tool of this.defaultTools) {
+      thread.addTool(tool);
+    }
+    for (const tool of this.customTools) {
+      thread.addTool(tool);
+    }
+    thread.addSubagentToolIfEligible((config) =>
+      eraseToolType(new SubagentTool(config)),
+    );
+
+    this.threads.set(thread.id, thread);
+    if (this.autoSave) {
+      this.saveThread(thread);
+    }
+    this.emit('thread_created', thread);
+
+    return thread;
   }
 
   /**

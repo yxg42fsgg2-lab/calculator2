@@ -228,8 +228,11 @@ export class AnthropicLanguageModel implements LanguageModel {
     try {
       const stream = this.client.messages.stream(params);
 
+      // Track in-progress tool calls for input accumulation
+      const activeToolCalls = new Map<number, { id: string; name: string; inputJson: string }>();
+
       for await (const event of stream) {
-        yield* this.mapStreamEvent(event);
+        yield* this.mapStreamEvent(event, activeToolCalls);
       }
 
       // Get final message for usage
@@ -262,29 +265,26 @@ export class AnthropicLanguageModel implements LanguageModel {
 
   /**
    * Map Anthropic SDK stream events to our internal event type.
+   * Properly accumulates tool call input from input_json_delta events
+   * and emits the complete tool_use when content_block_stop fires.
+   *
+   * Ported from: crates/anthropic/ streaming event handling
    */
   private *mapStreamEvent(
     event: Anthropic.MessageStreamEvent,
+    activeToolCalls: Map<number, { id: string; name: string; inputJson: string }>,
   ): Iterable<LanguageModelCompletionEvent> {
     switch (event.type) {
-      case 'content_block_delta': {
-        const delta = event.delta;
-        if (delta.type === 'text_delta') {
-          yield { type: 'text', text: delta.text };
-        } else if (delta.type === 'thinking_delta') {
-          yield {
-            type: 'thinking',
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            text: (delta as any)['thinking'] ?? '',
-          };
-        } else if (delta.type === 'input_json_delta') {
-          // Tool input streaming — we accumulate this and emit when complete
-        }
-        break;
-      }
       case 'content_block_start': {
         const block = event.content_block;
         if (block.type === 'tool_use') {
+          // Start tracking this tool call's input accumulation
+          activeToolCalls.set(event.index, {
+            id: block.id,
+            name: block.name,
+            inputJson: '',
+          });
+          // Emit initial tool_use with isInputComplete=false
           yield {
             type: 'tool_use',
             toolUse: {
@@ -298,11 +298,64 @@ export class AnthropicLanguageModel implements LanguageModel {
         }
         break;
       }
-      case 'content_block_stop': {
-        // When a tool_use block stops, mark input as complete
-        // The SDK should have accumulated the full input by now
+
+      case 'content_block_delta': {
+        const delta = event.delta;
+        if (delta.type === 'text_delta') {
+          yield { type: 'text', text: delta.text };
+        } else if (delta.type === 'thinking_delta') {
+          yield {
+            type: 'thinking',
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            text: (delta as any)['thinking'] ?? '',
+          };
+        } else if (delta.type === 'input_json_delta') {
+          // Accumulate tool input JSON from streaming deltas
+          const tc = activeToolCalls.get(event.index);
+          if (tc) {
+            tc.inputJson += (delta as { type: 'input_json_delta'; partial_json: string }).partial_json;
+          }
+        }
         break;
       }
+
+      case 'content_block_stop': {
+        // Finalize any tool call at this index
+        const tc = activeToolCalls.get(event.index);
+        if (tc) {
+          activeToolCalls.delete(event.index);
+          // Parse the accumulated JSON and emit complete tool_use
+          let parsedInput: unknown = {};
+          try {
+            if (tc.inputJson) {
+              parsedInput = JSON.parse(tc.inputJson);
+            }
+          } catch (e) {
+            // Emit parse error
+            yield {
+              type: 'tool_use_json_parse_error',
+              id: toolUseId(tc.id),
+              toolName: tc.name,
+              rawInput: tc.inputJson,
+              jsonParseError: e instanceof Error ? e.message : 'Invalid JSON',
+            };
+            break;
+          }
+          // Emit the final tool_use with isInputComplete=true
+          yield {
+            type: 'tool_use',
+            toolUse: {
+              id: toolUseId(tc.id),
+              name: tc.name,
+              rawInput: tc.inputJson,
+              input: parsedInput,
+              isInputComplete: true,
+            },
+          };
+        }
+        break;
+      }
+
       case 'message_start': {
         if (event.message.id) {
           yield { type: 'start_message', messageId: event.message.id };

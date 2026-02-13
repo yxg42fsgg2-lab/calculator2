@@ -22,6 +22,11 @@ import { EditParser, type EditFormat, type EditParserEvent, type EditParserMetri
 import { CreateFileParser, type CreateFileParserEvent } from './create-file-parser.js';
 import { StreamingFuzzyMatcher } from './streaming-fuzzy-matcher.js';
 import { computeLineDiff, formatDiff, type DiffOperation } from './streaming-diff.js';
+import {
+  buildXmlEditPrompt,
+  buildDiffFencedEditPrompt,
+  buildCreateFilePrompt,
+} from '../templates/edit-prompts.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -213,10 +218,15 @@ export class EditAgent {
 
   // --- Prompt builders ---
 
+  /**
+   * Build a prompt for creating a new file.
+   * Uses the ported Handlebars template from create_file_prompt.hbs.
+   */
   private buildCreatePrompt(description: string, filePath?: string): LanguageModelRequest {
-    const prompt = filePath
-      ? `Create a new file at \`${filePath}\`. ${description}\n\nReturn the complete file content wrapped in code fences.`
-      : `Create a new file. ${description}\n\nReturn the complete file content wrapped in code fences.`;
+    const prompt = buildCreateFilePrompt({
+      path: filePath,
+      edit_description: description,
+    });
 
     return {
       messages: [
@@ -230,31 +240,28 @@ export class EditAgent {
     };
   }
 
+  /**
+   * Build a prompt for editing an existing file.
+   * Uses the ported Handlebars templates from edit_file_prompt_xml.hbs
+   * or edit_file_prompt_diff_fenced.hbs depending on the edit format.
+   */
   private buildEditPrompt(
     description: string,
     filePath: string,
     currentContent: string,
   ): LanguageModelRequest {
-    let prompt: string;
+    // Build the edit prompt using the appropriate template
+    const editPromptData = {
+      path: filePath,
+      edit_description: description,
+    };
 
-    if (this.editFormat === 'xml_tags') {
-      prompt =
-        `Edit the file \`${filePath}\`.\n\n` +
-        `Description: ${description}\n\n` +
-        `Current file content:\n\`\`\`\n${currentContent}\n\`\`\`\n\n` +
-        `Respond with XML edit blocks. For each change, use:\n` +
-        `<old_text>text to find</old_text>\n` +
-        `<new_text>replacement text</new_text>\n\n` +
-        `The old_text must match exactly (whitespace-sensitive). Only include the minimal context needed to identify the location.`;
-    } else {
-      prompt =
-        `Edit the file \`${filePath}\`.\n\n` +
-        `Description: ${description}\n\n` +
-        `Current file content:\n\`\`\`\n${currentContent}\n\`\`\`\n\n` +
-        `Respond with diff-fenced edit blocks. For each change, use:\n` +
-        `<<<<<<< SEARCH\ntext to find\n=======\nreplacement text\n>>>>>>> REPLACE\n\n` +
-        `The search text must match exactly (whitespace-sensitive). Only include the minimal context needed to identify the location.`;
-    }
+    const editInstructions = this.editFormat === 'xml_tags'
+      ? buildXmlEditPrompt(editPromptData)
+      : buildDiffFencedEditPrompt(editPromptData);
+
+    // Include current file content as context
+    const prompt = `Current file content:\n\`\`\`\n${currentContent}\n\`\`\`\n\n${editInstructions}`;
 
     return {
       messages: [

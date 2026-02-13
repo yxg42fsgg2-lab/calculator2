@@ -2,8 +2,8 @@
 
 A complete, faithful, 1:1 port of [Zed](https://github.com/zed-industries/zed)'s AI coding agent backend into a standalone, framework-agnostic TypeScript library. Plug it into any UI by implementing the `BackendHost` interface.
 
-[![Tests](https://img.shields.io/badge/tests-331_passing-brightgreen)]()
-[![TypeScript](https://img.shields.io/badge/TypeScript-18.5K_LOC-blue)]()
+[![Tests](https://img.shields.io/badge/tests-382_passing-brightgreen)]()
+[![TypeScript](https://img.shields.io/badge/TypeScript-20.5K_LOC-blue)]()
 [![License](https://img.shields.io/badge/license-GPL--3.0-orange)]()
 
 ## What This Is
@@ -141,16 +141,15 @@ To plug in a custom UI, implement `BackendHost`:
 
 | Metric | Count |
 |--------|-------|
-| TypeScript LOC | 18,500+ |
-| Production LOC | 13,800+ |
-| Test LOC | 4,700+ |
-| Tests | 331 passing |
-| Test Suites | 33 |
-| Files | 112 |
-| Providers | 13 |
+| TypeScript LOC | 20,500+ |
+| Production LOC | 14,800+ |
+| Test LOC | 5,600+ |
+| Tests | 382 passing |
+| Test Suites | 40 |
+| Files | 125 |
+| Providers | 13 LLM + 3 web search |
 | Tools | 19 implementations |
 | Templates | 5 (system + 4 edit) |
-| Commits | 45+ |
 
 ## Documentation
 

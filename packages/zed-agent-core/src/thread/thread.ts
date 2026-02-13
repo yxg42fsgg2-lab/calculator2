@@ -49,6 +49,7 @@ import type {
   SubagentContext,
   RetryStatus,
   AcpTokenUsage,
+  DbThread,
 } from '../types/thread.js';
 import {
   emptyAgentMessage,
@@ -1074,6 +1075,129 @@ export class Thread extends EventEmitter<ThreadEvents> {
     }
 
     return prompt;
+  }
+
+  // --- Serialization (ported from Thread::to_db / Thread::from_db) ---
+
+  /**
+   * Serialize the thread to a DbThread for persistence.
+   * Ported from: Thread::to_db() in thread.rs
+   */
+  toDb(): DbThread {
+    return {
+      title: this.title,
+      messages: [...this.messages],
+      updatedAt: this._updatedAt.toISOString(),
+      detailedSummary: this._summary,
+      cumulativeTokenUsage: { ...this.cumulativeTokenUsage },
+      requestTokenUsage: new Map(this.requestTokenUsage),
+      model: this._model
+        ? {
+            provider: String(this._model.providerId),
+            model: String(this._model.id),
+          }
+        : undefined,
+      imported: false,
+      subagentContext: this.subagentContext,
+    };
+  }
+
+  /**
+   * Restore a thread from a DbThread.
+   * Ported from: Thread::from_db() in thread.rs
+   */
+  static fromDb(
+    id: SessionId,
+    dbThread: DbThread,
+    options: ThreadOptions,
+  ): Thread {
+    const thread = new Thread({
+      ...options,
+      id,
+      thinkingEnabled: options.model?.supportsThinking ?? false,
+    });
+    thread._title = dbThread.title || undefined;
+    thread._summary = dbThread.detailedSummary;
+    thread.messages = dbThread.messages;
+    thread._updatedAt = new Date(dbThread.updatedAt);
+    thread.cumulativeTokenUsage = dbThread.cumulativeTokenUsage;
+    thread.requestTokenUsage = new Map(dbThread.requestTokenUsage);
+    thread.subagentContext = dbThread.subagentContext;
+    return thread;
+  }
+
+  /**
+   * Replay all messages as events (for UI restoration after loading from DB).
+   * Ported from: Thread::replay() in thread.rs
+   */
+  replay(): AgentEvent[] {
+    const events: AgentEvent[] = [];
+    for (const msg of this.messages) {
+      switch (msg.type) {
+        case 'user':
+          events.push({
+            type: 'user_message',
+            id: msg.message.id,
+            content: msg.message.content,
+          });
+          break;
+        case 'agent':
+          for (const content of msg.message.content) {
+            switch (content.type) {
+              case 'text':
+                events.push({ type: 'agent_text', text: content.text });
+                break;
+              case 'thinking':
+                events.push({ type: 'agent_thinking', text: content.text });
+                break;
+              case 'tool_use': {
+                const toolUse = content.toolUse;
+                const tool = this.tools.get(toolUse.name);
+                events.push({
+                  type: 'tool_call',
+                  toolCallId: toolUse.id as unknown as import('../types/branded.js').ToolCallId,
+                  toolName: toolUse.name,
+                  title: tool?.initialTitle(toolUse.input) ?? toolUse.name,
+                  kind: tool?.kind ?? 'other',
+                  input: toolUse.input,
+                  meta: { tool_name: toolUse.name },
+                });
+                // Emit the tool result status
+                const result = msg.message.toolResults.get(toolUse.id);
+                if (result) {
+                  events.push({
+                    type: 'tool_call_update',
+                    toolCallId: toolUse.id as unknown as import('../types/branded.js').ToolCallId,
+                    fields: {
+                      status: result.isError ? 'failed' : 'completed',
+                      rawOutput: result.output,
+                    },
+                  });
+                }
+                break;
+              }
+            }
+          }
+          break;
+        case 'resume':
+          break;
+      }
+    }
+    return events;
+  }
+
+  /**
+   * Get all messages (for external inspection).
+   */
+  getMessages(): readonly Message[] {
+    return this.messages;
+  }
+
+  /**
+   * Get the raw title (undefined if not set).
+   */
+  getRawTitle(): string | undefined {
+    return this._title;
   }
 }
 

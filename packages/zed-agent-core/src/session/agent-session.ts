@@ -9,20 +9,23 @@
  * - Thread lifecycle
  * - Tool registration
  * - System prompt construction
+ * - Thread persistence (save/load to database)
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import { EventEmitter } from 'eventemitter3';
 import type { LanguageModel } from '../models/language-model.js';
 import type { LanguageModelRegistry } from '../models/registry.js';
 import { Thread, type ThreadOptions } from '../thread/thread.js';
 import { createDefaultTools } from '../tools/index.js';
+import { EditFileTool } from '../tools/edit-file-tool.js';
 import { buildSystemPrompt, systemPromptDataFromHost } from '../templates/system-prompt.js';
+import { ThreadsDatabase } from '../persistence/threads-database.js';
 import type { BackendHost } from '../types/host.js';
 import type { AgentSettings } from '../types/settings.js';
-import type { SessionId, UserMessageId } from '../types/branded.js';
-import { sessionId, agentProfileId } from '../types/branded.js';
-import type { StopReason, UserMessageContent } from '../types/index.js';
+import type { SessionId } from '../types/branded.js';
+import { agentProfileId } from '../types/branded.js';
+import type { StopReason, UserMessageContent, DbThreadMetadata } from '../types/index.js';
+import { eraseToolType } from '../types/tools.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,6 +44,10 @@ export interface AgentSessionOptions {
   registerDefaultTools?: boolean;
   /** Additional custom tools to register. */
   customTools?: import('../types/tools.js').AnyAgentTool[];
+  /** Path to SQLite database for thread persistence. If not provided, no persistence. */
+  databasePath?: string;
+  /** Whether to auto-save threads after each turn. Default: true if databasePath is set. */
+  autoSave?: boolean;
 }
 
 export interface AgentSessionEvents {
@@ -50,6 +57,8 @@ export interface AgentSessionEvents {
   thread_destroyed: [SessionId];
   /** Model was changed. */
   model_changed: [LanguageModel];
+  /** Thread list was updated (saved, deleted). */
+  thread_list_updated: [];
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +66,7 @@ export interface AgentSessionEvents {
 // ---------------------------------------------------------------------------
 
 /**
- * An agent session that manages threads and model state.
+ * An agent session that manages threads, model state, and persistence.
  * This is the top-level entry point for using the agent backend.
  *
  * ```typescript
@@ -74,6 +83,8 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
   private activeThread?: Thread;
   private defaultTools: import('../types/tools.js').AnyAgentTool[];
   private customTools: import('../types/tools.js').AnyAgentTool[];
+  private db?: ThreadsDatabase;
+  private autoSave: boolean;
 
   constructor(options: AgentSessionOptions) {
     super();
@@ -86,10 +97,25 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
       toolPermissionMode: 'auto',
       ...options.settings,
     };
-    this.defaultTools = options.registerDefaultTools !== false
-      ? createDefaultTools()
-      : [];
+
+    // Set up default tools, configuring EditFileTool with the edit model
+    if (options.registerDefaultTools !== false) {
+      this.defaultTools = createDefaultTools();
+      // Replace the default EditFileTool with one configured with the edit model
+      if (options.model) {
+        this.defaultTools = this.defaultTools.filter(t => t.name !== 'edit_file');
+        this.defaultTools.push(eraseToolType(new EditFileTool({ editModel: options.model })));
+      }
+    } else {
+      this.defaultTools = [];
+    }
     this.customTools = options.customTools ?? [];
+
+    // Set up persistence
+    if (options.databasePath) {
+      this.db = new ThreadsDatabase(options.databasePath);
+    }
+    this.autoSave = options.autoSave ?? !!options.databasePath;
   }
 
   // --- Thread management ---
@@ -113,11 +139,97 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
       thread.addTool(tool);
     }
 
+    // Set up auto-save on state changes
+    if (this.autoSave && this.db) {
+      const db = this.db;
+      thread.on('event', () => {
+        if (thread.isTurnComplete && !thread.isEmpty) {
+          this.saveThread(thread);
+        }
+      });
+      thread.on('title_updated', () => {
+        if (!thread.isEmpty) {
+          this.saveThread(thread);
+        }
+      });
+    }
+
     this.threads.set(thread.id, thread);
     this.activeThread = thread;
     this.emit('thread_created', thread);
 
     return thread;
+  }
+
+  /**
+   * Load a thread from the database.
+   * Ported from: NativeAgent::load_thread() / open_thread()
+   */
+  loadThread(id: SessionId): Thread | null {
+    if (!this.db) return null;
+
+    // Check if already loaded
+    const existing = this.threads.get(id);
+    if (existing) return existing;
+
+    const dbThread = this.db.loadThread(id);
+    if (!dbThread) return null;
+
+    // Resolve the model from the saved selection
+    let model = this.model;
+    if (dbThread.model && this.registry) {
+      const configured = this.registry.selectModel({
+        provider: dbThread.model.provider,
+        model: dbThread.model.model,
+      });
+      if (configured) {
+        model = configured.model;
+      }
+    }
+
+    const thread = Thread.fromDb(id, dbThread, {
+      host: this.host,
+      settings: this.settings,
+      model,
+      systemPromptBuilder: this.buildSystemPrompt.bind(this),
+    });
+
+    // Register tools
+    for (const tool of this.defaultTools) {
+      thread.addTool(tool);
+    }
+    for (const tool of this.customTools) {
+      thread.addTool(tool);
+    }
+
+    // Set up auto-save
+    if (this.autoSave && this.db) {
+      thread.on('event', () => {
+        if (thread.isTurnComplete && !thread.isEmpty) {
+          this.saveThread(thread);
+        }
+      });
+      thread.on('title_updated', () => {
+        if (!thread.isEmpty) {
+          this.saveThread(thread);
+        }
+      });
+    }
+
+    this.threads.set(thread.id, thread);
+    this.emit('thread_created', thread);
+
+    return thread;
+  }
+
+  /**
+   * Save a thread to the database.
+   */
+  saveThread(thread: Thread): void {
+    if (!this.db) return;
+    if (thread.isEmpty) return;
+    this.db.saveThread(thread.id, thread.toDb());
+    this.emit('thread_list_updated');
   }
 
   /**
@@ -131,10 +243,10 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
   }
 
   /**
-   * Get a thread by ID.
+   * Get a thread by ID (from memory or database).
    */
   getThread(id: SessionId): Thread | undefined {
-    return this.threads.get(id);
+    return this.threads.get(id) ?? this.loadThread(id) ?? undefined;
   }
 
   /**
@@ -144,6 +256,10 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
     const thread = this.threads.get(id);
     if (thread) {
       thread.cancel();
+      // Save before closing
+      if (this.autoSave && !thread.isEmpty) {
+        this.saveThread(thread);
+      }
       this.threads.delete(id);
       if (this.activeThread === thread) {
         this.activeThread = undefined;
@@ -153,10 +269,44 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
   }
 
   /**
-   * List all thread IDs.
+   * List all threads (from database if available, otherwise from memory).
    */
-  listThreads(): SessionId[] {
-    return Array.from(this.threads.keys());
+  listThreads(): DbThreadMetadata[] {
+    if (this.db) {
+      return this.db.listThreads();
+    }
+    // Fall back to in-memory threads
+    const result: DbThreadMetadata[] = [];
+    for (const thread of this.threads.values()) {
+      if (!thread.isEmpty) {
+        result.push({
+          id: thread.id,
+          title: thread.title,
+          updatedAt: thread.updatedAt.toISOString(),
+        });
+      }
+    }
+    return result.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /**
+   * Delete a thread from memory and database.
+   */
+  deleteThread(id: SessionId): void {
+    this.closeThread(id);
+    this.db?.deleteThread(id);
+    this.emit('thread_list_updated');
+  }
+
+  /**
+   * Delete all threads.
+   */
+  deleteAllThreads(): void {
+    for (const id of Array.from(this.threads.keys())) {
+      this.closeThread(id);
+    }
+    this.db?.deleteAllThreads();
+    this.emit('thread_list_updated');
   }
 
   // --- Model management ---
@@ -167,12 +317,16 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
   setModel(model: LanguageModel): void {
     this.model = model;
 
-    // Update all threads that don't have a model set
+    // Update EditFileTool for all threads
     for (const thread of this.threads.values()) {
       if (!thread.model) {
         thread.setModel(model);
       }
     }
+
+    // Update the default EditFileTool config
+    this.defaultTools = this.defaultTools.filter(t => t.name !== 'edit_file');
+    this.defaultTools.push(eraseToolType(new EditFileTool({ editModel: model })));
 
     this.emit('model_changed', model);
   }
@@ -199,7 +353,14 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
       : this.getOrCreateActiveThread();
 
     const content: UserMessageContent[] = [{ type: 'text', text }];
-    return thread.send(content);
+    const result = await thread.send(content);
+
+    // Save after turn completes
+    if (this.autoSave) {
+      this.saveThread(thread);
+    }
+
+    return result;
   }
 
   /**
@@ -210,6 +371,21 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
       ? this.getThread(threadId)
       : this.activeThread;
     thread?.cancel();
+  }
+
+  /**
+   * Close the session and clean up resources.
+   */
+  close(): void {
+    for (const thread of this.threads.values()) {
+      thread.cancel();
+      if (this.autoSave && !thread.isEmpty) {
+        this.saveThread(thread);
+      }
+    }
+    this.threads.clear();
+    this.activeThread = undefined;
+    this.db?.close();
   }
 
   // --- Private ---

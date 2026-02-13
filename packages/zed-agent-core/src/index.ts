@@ -33,3 +33,6 @@ export * from './models/index.js';
 
 // Re-export tools
 export * from './tools/index.js';
+
+// Re-export thread
+export * from './thread/index.js';

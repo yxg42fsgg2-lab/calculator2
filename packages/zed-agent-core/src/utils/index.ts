@@ -13,3 +13,6 @@ export {
 
 export { ActionLog } from './action-log.js';
 export type { ActionLogEntry, ActionType } from './action-log.js';
+
+export { validateHost, assertValidHost } from './validation.js';
+export type { ValidationIssue } from './validation.js';

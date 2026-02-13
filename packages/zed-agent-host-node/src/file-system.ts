@@ -168,10 +168,84 @@ export class NodeFileSystem implements FileSystem {
     }
   }
 
-  private async grepWithNode(_options: GrepOptions): Promise<GrepResult> {
-    // Simplified Node.js fallback — just returns empty for now
-    // A full implementation would walk the file tree and search
-    return { matches: [], totalMatches: 0, truncated: false };
+  /**
+   * Pure Node.js grep fallback when ripgrep is not available.
+   * Walks the file tree, reads each file, and searches with regex.
+   */
+  private async grepWithNode(options: GrepOptions): Promise<GrepResult> {
+    const regex = new RegExp(options.pattern, options.caseSensitive ? '' : 'i');
+    const includeGlob = options.includePattern;
+    const matches: GrepMatch[] = [];
+    const maxMatches = 500; // Cap to prevent runaway searches
+
+    const walkDir = async (dirPath: string): Promise<void> => {
+      if (matches.length >= maxMatches) return;
+
+      let entryNames: string[];
+      try {
+        entryNames = await fs.readdir(dirPath);
+      } catch {
+        return; // Permission denied or not a directory
+      }
+
+      for (const entryName of entryNames) {
+        if (matches.length >= maxMatches) break;
+        const fullPath = path.join(dirPath, entryName);
+
+        // Skip common exclusions
+        if (entryName === 'node_modules' || entryName === '.git' ||
+            entryName === 'dist' || entryName === '__pycache__' ||
+            entryName === '.next' || entryName === 'target') {
+          continue;
+        }
+
+        let stat: Awaited<ReturnType<typeof fs.stat>>;
+        try {
+          stat = await fs.stat(fullPath);
+        } catch {
+          continue;
+        }
+
+        if (stat.isDirectory()) {
+          await walkDir(fullPath);
+        } else if (stat.isFile()) {
+          // Check include pattern
+          if (includeGlob && !simpleGlobMatch(includeGlob, fullPath)) {
+            continue;
+          }
+
+          // Skip large files
+          if (stat.size > 1024 * 1024) continue; // Skip files > 1MB
+
+          // Read and search
+          try {
+            const content = await fs.readFile(fullPath, 'utf-8');
+            const lines = content.split('\n');
+            for (let i = 0; i < lines.length && matches.length < maxMatches; i++) {
+              if (regex.test(lines[i]!)) {
+                matches.push({
+                  path: fullPath,
+                  lineNumber: i + 1,
+                  lineContent: lines[i]!.trimEnd(),
+                });
+              }
+            }
+          } catch {
+            // Skip unreadable files (binary, encoding issues)
+          }
+        }
+      }
+    };
+
+    // Walk from current directory
+    await walkDir(process.cwd());
+
+    const offset = options.offset ?? 0;
+    return {
+      matches: matches.slice(offset),
+      totalMatches: matches.length,
+      truncated: matches.length >= maxMatches,
+    };
   }
 
   async findPath(glob: string, options?: FindPathOptions): Promise<FindPathResult> {

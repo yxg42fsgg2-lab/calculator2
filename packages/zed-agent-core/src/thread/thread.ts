@@ -195,6 +195,37 @@ export class Thread extends EventEmitter<ThreadEvents> {
     return Array.from(this.tools.keys());
   }
 
+  /**
+   * Add the SubagentTool if depth allows.
+   * Ported from: Thread::add_default_tools() subagent check in thread.rs
+   *
+   * This should be called after all other tools are registered, since the
+   * SubagentTool inherits the parent's tool set.
+   */
+  addSubagentToolIfEligible(): void {
+    if (this.depth >= MAX_SUBAGENT_DEPTH) return;
+    if (this.tools.has('subagent')) return; // Already registered
+
+    const { SubagentTool } = require('../tools/subagent-tool.js') as {
+      SubagentTool: new (config: import('../tools/subagent-tool.js').SubagentToolConfig) => import('../types/tools.js').AgentTool<import('../tools/subagent-tool.js').SubagentToolInput, string>;
+    };
+    const { eraseToolType } = require('../types/tools.js') as {
+      eraseToolType: typeof import('../types/tools.js').eraseToolType;
+    };
+
+    const subagentTool = new SubagentTool({
+      model: this._model,
+      parentTools: new Map(this.tools),
+      parentDepth: this.depth,
+      parentSessionId: this.id,
+      host: this.host,
+      settings: this.settings,
+      systemPromptBuilder: this.systemPromptBuilder,
+    });
+
+    this.tools.set('subagent', eraseToolType(subagentTool));
+  }
+
   // --- Token usage ---
 
   latestTokenUsage(): AcpTokenUsage | null {

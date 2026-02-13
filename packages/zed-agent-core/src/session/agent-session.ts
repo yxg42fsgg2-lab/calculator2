@@ -138,6 +138,8 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
     for (const tool of this.customTools) {
       thread.addTool(tool);
     }
+    // Add SubagentTool if depth allows (must be after other tools)
+    thread.addSubagentToolIfEligible();
 
     // Set up auto-save on state changes
     if (this.autoSave && this.db) {
@@ -201,6 +203,8 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
     for (const tool of this.customTools) {
       thread.addTool(tool);
     }
+    // Add SubagentTool if depth allows
+    thread.addSubagentToolIfEligible();
 
     // Set up auto-save
     if (this.autoSave && this.db) {

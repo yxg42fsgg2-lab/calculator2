@@ -201,19 +201,24 @@ export class Thread extends EventEmitter<ThreadEvents> {
    *
    * This should be called after all other tools are registered, since the
    * SubagentTool inherits the parent's tool set.
+   *
+   * Takes a factory function to avoid circular imports between thread and tools.
    */
-  addSubagentToolIfEligible(): void {
+  addSubagentToolIfEligible(
+    factory: (config: {
+      model?: LanguageModel;
+      parentTools: Map<string, AnyAgentTool>;
+      parentDepth: number;
+      parentSessionId: SessionId;
+      host: BackendHost;
+      settings: AgentSettings;
+      systemPromptBuilder?: (tools: string[], modelName?: string) => string;
+    }) => AnyAgentTool,
+  ): void {
     if (this.depth >= MAX_SUBAGENT_DEPTH) return;
     if (this.tools.has('subagent')) return; // Already registered
 
-    const { SubagentTool } = require('../tools/subagent-tool.js') as {
-      SubagentTool: new (config: import('../tools/subagent-tool.js').SubagentToolConfig) => import('../types/tools.js').AgentTool<import('../tools/subagent-tool.js').SubagentToolInput, string>;
-    };
-    const { eraseToolType } = require('../types/tools.js') as {
-      eraseToolType: typeof import('../types/tools.js').eraseToolType;
-    };
-
-    const subagentTool = new SubagentTool({
+    const subagentTool = factory({
       model: this._model,
       parentTools: new Map(this.tools),
       parentDepth: this.depth,
@@ -223,7 +228,7 @@ export class Thread extends EventEmitter<ThreadEvents> {
       systemPromptBuilder: this.systemPromptBuilder,
     });
 
-    this.tools.set('subagent', eraseToolType(subagentTool));
+    this.tools.set('subagent', subagentTool);
   }
 
   // --- Token usage ---

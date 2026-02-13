@@ -96,7 +96,7 @@ export class ThreadsDatabase {
       subagent_context: thread.subagentContext,
     };
 
-    const data = Buffer.from(JSON.stringify(serialized), 'utf-8');
+    const data = Buffer.from(JSON.stringify(serialized, mapReplacer), 'utf-8');
 
     this.db
       .prepare(
@@ -117,7 +117,7 @@ export class ThreadsDatabase {
     if (!row) return null;
 
     try {
-      const serialized: SerializedThread = JSON.parse(row.data.toString('utf-8'));
+      const serialized: SerializedThread = JSON.parse(row.data.toString('utf-8'), mapReviver);
       return {
         title: serialized.title,
         messages: serialized.messages,
@@ -184,4 +184,36 @@ export class ThreadsDatabase {
   close(): void {
     this.db.close();
   }
+}
+
+// ---------------------------------------------------------------------------
+// JSON serialization helpers for Map objects
+// ---------------------------------------------------------------------------
+
+/**
+ * JSON.stringify replacer that converts Map instances to serializable arrays.
+ */
+function mapReplacer(_key: string, value: unknown): unknown {
+  if (value instanceof Map) {
+    return {
+      __type: 'Map',
+      entries: Array.from((value as Map<unknown, unknown>).entries()),
+    };
+  }
+  return value;
+}
+
+/**
+ * JSON.parse reviver that restores Map instances from serialized arrays.
+ */
+function mapReviver(_key: string, value: unknown): unknown {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as Record<string, unknown>).__type === 'Map' &&
+    Array.isArray((value as Record<string, unknown>).entries)
+  ) {
+    return new Map((value as { entries: Array<[unknown, unknown]> }).entries);
+  }
+  return value;
 }

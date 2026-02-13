@@ -186,6 +186,22 @@ function getCompiledTemplate(): Handlebars.TemplateDelegate {
       }
       return '';
     });
+    // Register 'or' helper for conditional checks
+    hbs.registerHelper('or', function (this: unknown, ...args: unknown[]) {
+      // Last arg is the Handlebars options object
+      const values = args.slice(0, -1);
+      return values.some(Boolean);
+    });
+    // Register 'gt' helper for numeric comparisons
+    hbs.registerHelper('gt', function (this: unknown, a: unknown, b: unknown) {
+      return Number(a) > Number(b);
+    });
+    // Register 'len' helper for array/string length
+    hbs.registerHelper('len', function (this: unknown, val: unknown) {
+      if (Array.isArray(val)) return val.length;
+      if (typeof val === 'string') return val.length;
+      return 0;
+    });
     compiledTemplate = hbs.compile(SYSTEM_PROMPT_TEMPLATE, { strict: false });
   }
   return compiledTemplate;

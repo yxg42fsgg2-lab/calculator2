@@ -18,6 +18,7 @@ import type { LanguageModelRegistry } from '../models/registry.js';
 import { Thread, type ThreadOptions } from '../thread/thread.js';
 import { createDefaultTools } from '../tools/index.js';
 import { EditFileTool } from '../tools/edit-file-tool.js';
+import { SubagentTool } from '../tools/subagent-tool.js';
 import { buildSystemPrompt, systemPromptDataFromHost } from '../templates/system-prompt.js';
 import { ThreadsDatabase } from '../persistence/threads-database.js';
 import type { BackendHost } from '../types/host.js';
@@ -139,7 +140,9 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
       thread.addTool(tool);
     }
     // Add SubagentTool if depth allows (must be after other tools)
-    thread.addSubagentToolIfEligible();
+    thread.addSubagentToolIfEligible((config) =>
+      eraseToolType(new SubagentTool(config)),
+    );
 
     // Set up auto-save on state changes
     if (this.autoSave && this.db) {
@@ -204,7 +207,9 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
       thread.addTool(tool);
     }
     // Add SubagentTool if depth allows
-    thread.addSubagentToolIfEligible();
+    thread.addSubagentToolIfEligible((config) =>
+      eraseToolType(new SubagentTool(config)),
+    );
 
     // Set up auto-save
     if (this.autoSave && this.db) {

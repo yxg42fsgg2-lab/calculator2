@@ -28,7 +28,7 @@ export { GrepTool } from './grep-tool.js';
 export type { GrepToolInput } from './grep-tool.js';
 
 export { EditFileTool } from './edit-file-tool.js';
-export type { EditFileToolInput, EditFileMode } from './edit-file-tool.js';
+export type { EditFileToolInput, EditFileMode, EditFileToolConfig } from './edit-file-tool.js';
 
 export { CreateDirectoryTool } from './create-directory-tool.js';
 export type { CreateDirectoryToolInput } from './create-directory-tool.js';

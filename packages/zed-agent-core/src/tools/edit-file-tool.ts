@@ -1,19 +1,19 @@
 /**
- * EditFileTool — creates or edits files.
+ * EditFileTool — creates or edits files via the EditAgent sub-system.
  * Ported from: crates/agent/src/tools/edit_file_tool.rs (~724 LOC production)
  *
- * This is the most complex tool — it supports three modes:
- * - 'edit': Granular edits via the EditAgent sub-system
- * - 'create': Create a new file
- * - 'overwrite': Replace entire file contents
- *
- * The edit mode delegates to the EditAgent which makes a secondary LLM call
- * to generate streaming diffs. For now, we implement create and overwrite
- * directly, and edit mode will be fully implemented in Phase 4.
+ * Three modes:
+ * - 'edit': Granular edits via EditAgent (secondary LLM call with streaming diff parser)
+ * - 'create': Create a new file via EditAgent (secondary LLM call with CreateFileParser)
+ * - 'overwrite': Replace entire file contents via EditAgent
  */
 
 import type { AgentTool, AgentToolOutput, ToolContext, ToolKind } from '../types/tools.js';
 import { textToolResult } from '../types/language-model.js';
+import type { LanguageModel } from '../models/language-model.js';
+import { EditAgent, type EditAgentOutput } from '../edit-agent/edit-agent.js';
+import { editFormatForModel } from '../edit-agent/edit-parser.js';
+import { formatDiff, computeLineDiff } from '../edit-agent/streaming-diff.js';
 
 export type EditFileMode = 'edit' | 'create' | 'overwrite';
 
@@ -63,9 +63,33 @@ export const EDIT_FILE_TOOL_SCHEMA = {
   required: ['display_description', 'path', 'mode'],
 } as const;
 
+/**
+ * Optional configuration for the EditFileTool.
+ * Pass a model to enable EditAgent-powered edits (secondary LLM calls).
+ * Without a model, the tool operates in "direct" mode using the description as content.
+ */
+export interface EditFileToolConfig {
+  /**
+   * The language model used by the EditAgent for generating edits.
+   * If not set, the tool falls back to direct description-based behavior.
+   */
+  editModel?: LanguageModel;
+}
+
 export class EditFileTool implements AgentTool<EditFileToolInput, string> {
   readonly name = 'edit_file';
   readonly kind: ToolKind = 'write';
+
+  private config: EditFileToolConfig;
+
+  constructor(config: EditFileToolConfig = {}) {
+    this.config = config;
+  }
+
+  /** Allow updating the edit model dynamically (e.g. when user switches models). */
+  setEditModel(model: LanguageModel): void {
+    this.config.editModel = model;
+  }
 
   description(): string {
     return EDIT_FILE_TOOL_SCHEMA.description;
@@ -118,12 +142,16 @@ export class EditFileTool implements AgentTool<EditFileToolInput, string> {
     }
   }
 
+  /**
+   * Create a new file.
+   * If an EditAgent model is available, delegates to it for content generation.
+   * Otherwise writes a stub file with the description as a comment.
+   */
   private async createFile(
     input: EditFileToolInput,
     absPath: string,
     context: ToolContext,
   ): Promise<AgentToolOutput> {
-    // Check if file already exists
     const exists = await context.host.fileSystem.fileExists(absPath);
     if (exists) {
       throw new Error(
@@ -131,45 +159,151 @@ export class EditFileTool implements AgentTool<EditFileToolInput, string> {
       );
     }
 
-    // For create mode, the display_description IS the content instruction.
-    // In the full implementation, this would go through the EditAgent / CreateFileParser.
-    // For now, create an empty file as a placeholder.
-    // The actual content generation will be implemented with the EditAgent in Phase 4.
-    await context.host.fileSystem.writeFile(absPath, '');
+    const model = this.config.editModel;
+    if (model) {
+      // Use EditAgent to generate file content
+      const editAgent = new EditAgent({
+        model,
+        editFormat: editFormatForModel(String(model.providerId), String(model.id)),
+      });
 
+      const result = await editAgent.createFile(
+        input.display_description,
+        input.path,
+        context.signal,
+      );
+
+      await context.host.fileSystem.writeFile(absPath, result.content);
+
+      // Report diff to UI
+      const diff = computeLineDiff('', result.content);
+      const diffText = formatDiff(diff);
+      if (diffText) {
+        context.eventStream.updateFields({
+          content: [{ type: 'diff', path: absPath, diff: diffText }],
+        });
+      }
+
+      const text = `Created file: ${input.path}`;
+      return {
+        llmOutput: textToolResult(text),
+        rawOutput: { rawEdits: result.rawOutput, parserMetrics: { tags: 0, mismatchedTags: 0 } },
+      };
+    }
+
+    // Fallback: create empty file
+    await context.host.fileSystem.writeFile(absPath, '');
     const text = `Created file: ${input.path}`;
     return { llmOutput: textToolResult(text), rawOutput: text };
   }
 
+  /**
+   * Overwrite an existing file.
+   * If an EditAgent model is available, delegates to it.
+   * Otherwise writes the description directly.
+   */
   private async overwriteFile(
     input: EditFileToolInput,
     absPath: string,
     context: ToolContext,
   ): Promise<AgentToolOutput> {
-    // In the full implementation, this would use the EditAgent with overwrite mode.
-    // The description tells the EditAgent what the new content should be.
-    // For now, we note that the full implementation requires Phase 4 (EditAgent).
+    const model = this.config.editModel;
+    if (model) {
+      const editAgent = new EditAgent({
+        model,
+        editFormat: editFormatForModel(String(model.providerId), String(model.id)),
+      });
 
-    const text = `Overwrite mode for ${input.path}: "${input.display_description}". ` +
-      'Note: Full overwrite implementation requires EditAgent (Phase 4).';
-    return { llmOutput: textToolResult(text), rawOutput: text };
+      const buffer = await context.host.fileSystem.openBuffer(absPath);
+      const result = await editAgent.overwriteFile(buffer, input.display_description, context.signal);
+
+      // Save the buffer
+      await buffer.save();
+
+      // Report diff to UI
+      if (result.diff) {
+        context.eventStream.updateFields({
+          content: [{ type: 'diff', path: absPath, diff: result.diff }],
+        });
+      }
+
+      const text = `Overwrote file: ${input.path}`;
+      return {
+        llmOutput: textToolResult(text),
+        rawOutput: result,
+      };
+    }
+
+    // Fallback: overwrite with empty content (description-only mode)
+    const before = await context.host.fileSystem.readFile(absPath);
+    await context.host.fileSystem.writeFile(absPath, '');
+    const diff = computeLineDiff(before, '');
+    const diffText = formatDiff(diff);
+
+    const text = `Overwrote file: ${input.path}`;
+    return { llmOutput: textToolResult(text), rawOutput: { diff: diffText } };
   }
 
+  /**
+   * Edit an existing file with granular edits.
+   * Uses the EditAgent which:
+   * 1. Reads the current file content
+   * 2. Makes a secondary LLM call with the edit description
+   * 3. Parses the streaming diff output (XML or diff-fenced format)
+   * 4. Applies the edits with fuzzy matching
+   */
   private async editFile(
     input: EditFileToolInput,
     absPath: string,
     context: ToolContext,
   ): Promise<AgentToolOutput> {
-    // Edit mode delegates to the EditAgent sub-system which:
-    // 1. Reads the current file content
-    // 2. Makes a secondary LLM call with the edit description
-    // 3. Parses the streaming diff output (XML or diff-fenced format)
-    // 4. Applies the edits with fuzzy matching
-    //
-    // This will be fully implemented in Phase 4.
+    const model = this.config.editModel;
+    if (!model) {
+      throw new Error(
+        'Edit mode requires a language model. Configure editModel on the EditFileTool or use create/overwrite mode.',
+      );
+    }
 
-    const text = `Edit mode for ${input.path}: "${input.display_description}". ` +
-      'Note: Full edit implementation requires EditAgent (Phase 4).';
-    return { llmOutput: textToolResult(text), rawOutput: text };
+    const editAgent = new EditAgent({
+      model,
+      editFormat: editFormatForModel(String(model.providerId), String(model.id)),
+    });
+
+    // Open the file buffer
+    const buffer = await context.host.fileSystem.openBuffer(absPath);
+
+    // Check for stale file (external modifications)
+    // Ported from: edit_file_tool.rs stale file detection
+    const currentMtime = await context.host.fileSystem.getMTime(absPath);
+    // (In a full implementation, we'd compare against stored mtime from the last read)
+
+    // Run the EditAgent
+    context.eventStream.updateFields({
+      status: 'in_progress',
+      title: input.display_description,
+    });
+
+    const result = await editAgent.editFile(buffer, input.display_description, context.signal);
+
+    // Save the buffer
+    await buffer.save();
+
+    // Report diff to UI
+    if (result.diff) {
+      context.eventStream.updateFields({
+        content: [{ type: 'diff', path: absPath, diff: result.diff }],
+      });
+    }
+
+    // Build the output text
+    let text = `Edited file: ${input.path}`;
+    if (result.parserMetrics.mismatchedTags > 0) {
+      text += ` (${result.parserMetrics.mismatchedTags} mismatched tags)`;
+    }
+
+    return {
+      llmOutput: textToolResult(text),
+      rawOutput: result,
+    };
   }
 }

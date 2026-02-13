@@ -14,7 +14,8 @@ describe('ToolRegistry', () => {
       registry.register(tool);
     }
 
-    expect(registry.size).toBe(18);
+    // 17 default tools (SubagentTool is added dynamically by Thread)
+    expect(registry.size).toBe(17);
     expect(registry.has('read_file')).toBe(true);
     expect(registry.has('nonexistent')).toBe(false);
   });
@@ -42,7 +43,7 @@ describe('ToolRegistry', () => {
       registry.register(tool);
     }
     const requestTools = registry.toRequestTools();
-    expect(requestTools.length).toBe(18);
+    expect(requestTools.length).toBe(17);
     for (const rt of requestTools) {
       expect(rt.name).toBeTruthy();
       expect(rt.description).toBeTruthy();
@@ -61,10 +62,13 @@ describe('ALL_TOOL_NAMES', () => {
     expect(unique.size).toBe(ALL_TOOL_NAMES.length);
   });
 
-  it('matches created tools', () => {
+  it('includes subagent (added dynamically by Thread)', () => {
+    expect(ALL_TOOL_NAMES).toContain('subagent');
+  });
+
+  it('createDefaultTools returns 17 (excludes subagent)', () => {
     const tools = createDefaultTools();
-    const createdNames = tools.map((t) => t.name).sort();
-    const allNames = [...ALL_TOOL_NAMES].sort();
-    expect(createdNames).toEqual(allNames);
+    expect(tools.length).toBe(17);
+    expect(tools.find(t => t.name === 'subagent')).toBeUndefined();
   });
 });

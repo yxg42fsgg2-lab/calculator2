@@ -66,7 +66,7 @@ export { OpenTool } from './open-tool.js';
 export type { OpenToolInput } from './open-tool.js';
 
 export { SubagentTool } from './subagent-tool.js';
-export type { SubagentToolInput } from './subagent-tool.js';
+export type { SubagentToolInput, SubagentToolConfig } from './subagent-tool.js';
 
 // --- Factory function ---
 
@@ -92,8 +92,11 @@ import { TerminalTool as _TerminalTool } from './terminal-tool.js';
 import { WebSearchTool as _WebSearchTool } from './web-search-tool.js';
 
 /**
- * Create all 18 default tools.
+ * Create all 17 default tools (excludes SubagentTool which requires runtime config).
  * Ported from: Thread::add_default_tools() in thread.rs
+ *
+ * SubagentTool is added separately by the Thread when depth < MAX_SUBAGENT_DEPTH,
+ * since it needs the parent thread's model, tools, and session context.
  *
  * Returns an array of type-erased tools ready for registration.
  */
@@ -114,7 +117,6 @@ export function createDefaultTools(): AnyAgentTool[] {
     eraseToolType(new _ReadFileTool()),
     eraseToolType(new _RestoreFileTool()),
     eraseToolType(new _SaveFileTool()),
-    eraseToolType(new _SubagentTool()),
     eraseToolType(new _TerminalTool()),
     eraseToolType(new _WebSearchTool()),
   ];

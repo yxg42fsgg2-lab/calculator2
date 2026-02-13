@@ -1378,6 +1378,51 @@ export class Thread extends EventEmitter<ThreadEvents> {
   getRawTitle(): string | undefined {
     return this._title;
   }
+
+  /**
+   * Export the full conversation as Markdown.
+   * Ported from: Thread::to_markdown() in thread.rs
+   *
+   * Format:
+   * ```markdown
+   * ## User
+   *
+   * user message content
+   *
+   * ## Assistant
+   *
+   * assistant response content
+   * ```
+   */
+  toMarkdown(): string {
+    let markdown = '';
+
+    for (let i = 0; i < this.messages.length; i++) {
+      const msg = this.messages[i]!;
+      if (i > 0) markdown += '\n';
+
+      switch (msg.type) {
+        case 'user':
+          markdown += '## User\n\n';
+          markdown += userMessageToMarkdown(msg.message);
+          break;
+        case 'agent':
+          markdown += '## Assistant\n\n';
+          markdown += agentMessageToMarkdown(msg.message);
+          break;
+        case 'resume':
+          // Resume messages are internal, skip in export
+          break;
+      }
+    }
+
+    if (this.pendingMessage) {
+      markdown += '\n## Assistant\n\n';
+      markdown += agentMessageToMarkdown(this.pendingMessage);
+    }
+
+    return markdown;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1587,4 +1632,65 @@ function mentionUriAsLink(uri: import('../types/thread.js').MentionUri): string 
     case 'pasted_image':
       return '[image]';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Markdown export helpers — ported from thread.rs to_markdown methods
+// ---------------------------------------------------------------------------
+
+function userMessageToMarkdown(msg: import('../types/thread.js').UserMessage): string {
+  let md = '';
+  for (const c of msg.content) {
+    switch (c.type) {
+      case 'text':
+        md += c.text + '\n';
+        break;
+      case 'image':
+        md += '<image />\n';
+        break;
+      case 'mention':
+        if (c.content) {
+          md += `${mentionUriAsLink(c.uri)}\n\n${c.content}\n`;
+        } else {
+          md += `${mentionUriAsLink(c.uri)}\n`;
+        }
+        break;
+    }
+  }
+  md += '\n';
+  return md;
+}
+
+function agentMessageToMarkdown(msg: import('../types/thread.js').AgentMessage): string {
+  let md = '';
+  for (const c of msg.content) {
+    switch (c.type) {
+      case 'text':
+        md += c.text + '\n';
+        break;
+      case 'thinking':
+        md += `<think>${c.text}</think>\n`;
+        break;
+      case 'redacted_thinking':
+        md += '<redacted_thinking />\n';
+        break;
+      case 'tool_use':
+        md += `**Tool Use**: ${c.toolUse.name} (ID: ${c.toolUse.id})\n`;
+        md += `\`\`\`json\n${JSON.stringify(c.toolUse.input, null, 2)}\n\`\`\`\n`;
+        break;
+    }
+  }
+
+  for (const [, result] of msg.toolResults) {
+    md += `**Tool Result**: ${result.toolName} (ID: ${result.toolUseId})\n\n`;
+    if (result.isError) md += '**ERROR:**\n';
+    if (result.content.type === 'text') {
+      md += result.content.text + '\n\n';
+    } else {
+      md += '<image />\n\n';
+    }
+  }
+
+  md += '\n';
+  return md;
 }

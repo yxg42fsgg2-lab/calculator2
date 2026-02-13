@@ -272,10 +272,24 @@ export class EditFileTool implements AgentTool<EditFileToolInput, string> {
     // Open the file buffer
     const buffer = await context.host.fileSystem.openBuffer(absPath);
 
-    // Check for stale file (external modifications)
+    // Check for stale file (external modifications since last read)
     // Ported from: edit_file_tool.rs stale file detection
-    const currentMtime = await context.host.fileSystem.getMTime(absPath);
-    // (In a full implementation, we'd compare against stored mtime from the last read)
+    if (context.getFileReadTime) {
+      const lastReadTime = context.getFileReadTime(absPath);
+      if (lastReadTime !== undefined) {
+        const currentMtime = await context.host.fileSystem.getMTime(absPath);
+        if (currentMtime !== null && currentMtime > lastReadTime) {
+          // File was modified externally since the agent last read it
+          // Add a warning to the edit description so the EditAgent is aware
+          input = {
+            ...input,
+            display_description: input.display_description +
+              '\n\nWARNING: This file has been modified externally since you last read it. ' +
+              'Re-read the file first to see the latest changes before editing.',
+          };
+        }
+      }
+    }
 
     // Run the EditAgent
     context.eventStream.updateFields({

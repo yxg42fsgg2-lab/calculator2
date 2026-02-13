@@ -132,6 +132,17 @@ export interface ToolContext {
   eventStream: ToolCallEventStream;
   /** Abort signal — set when user cancels the tool. */
   signal: AbortSignal;
+  /**
+   * Record that a file was read at a given mtime.
+   * Used by edit_file to detect stale files (modified externally since last read).
+   * Ported from: Thread.file_read_times in thread.rs
+   */
+  recordFileRead?(absPath: string, mtime: number): void;
+  /**
+   * Get the mtime at which a file was last read by the agent.
+   * Returns undefined if the file hasn't been read.
+   */
+  getFileReadTime?(absPath: string): number | undefined;
 }
 
 /**

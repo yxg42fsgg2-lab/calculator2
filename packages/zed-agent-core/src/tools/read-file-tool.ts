@@ -99,6 +99,13 @@ export class ReadFileTool implements AgentTool<ReadFileToolInput, string> {
       throw new Error(`${input.path} not found`);
     }
 
+    // Record file read time for stale detection
+    // Ported from: ReadFileTool recording mtime in thread.file_read_times
+    const mtime = await fs.getMTime(absPath);
+    if (mtime !== null && context.recordFileRead) {
+      context.recordFileRead(absPath, mtime);
+    }
+
     // Update tool call with location
     context.eventStream.updateFields({
       locations: [{ path: absPath, line: input.start_line ? input.start_line - 1 : undefined }],

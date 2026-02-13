@@ -631,10 +631,17 @@ export class Thread extends EventEmitter<ThreadEvents> {
     // Update status to in_progress
     eventStream.updateFields({ status: 'in_progress' });
 
+    const fileReadTimes = this.fileReadTimes;
     const context: ToolContext = {
       host: this.host,
       eventStream,
       signal,
+      recordFileRead(absPath: string, mtime: number) {
+        fileReadTimes.set(absPath, mtime);
+      },
+      getFileReadTime(absPath: string) {
+        return fileReadTimes.get(absPath);
+      },
     };
 
     // Run the tool

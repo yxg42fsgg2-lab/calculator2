@@ -123,6 +123,7 @@ export class Thread extends EventEmitter<ThreadEvents> {
   private fileReadTimes: Map<string, number> = new Map(); // path → mtime
   private _pendingTitleGeneration = false;
   private _useStreamingEditTool = false;
+  private _actionLog?: import('../utils/action-log.js').ActionLog;
 
   // External dependencies
   private host: BackendHost;
@@ -141,6 +142,7 @@ export class Thread extends EventEmitter<ThreadEvents> {
     this._thinkingEffort = options.thinkingEffort;
     this.systemPromptBuilder = options.systemPromptBuilder;
     this._useStreamingEditTool = options.useStreamingEditTool ?? false;
+    this._actionLog = options.actionLog;
 
     if (options.model?.supportsThinking) {
       this._thinkingEnabled = true;
@@ -160,6 +162,15 @@ export class Thread extends EventEmitter<ThreadEvents> {
   get isTurnComplete(): boolean { return !this.runningTurnAbort; }
   get isSubagent(): boolean { return !!this.subagentContext; }
   get depth(): number { return this.subagentContext?.depth ?? 0; }
+  get actionLog(): import('../utils/action-log.js').ActionLog | undefined { return this._actionLog; }
+
+  /**
+   * Whether the UI has a queued message waiting to be sent.
+   * When true, the current turn will end at the next message boundary
+   * so the queued message can be processed.
+   * Ported from: Thread::has_queued_message in thread.rs
+   */
+  get hasMessageQueued(): boolean { return this.hasQueuedMessage; }
 
   // --- Setters ---
 
@@ -174,6 +185,13 @@ export class Thread extends EventEmitter<ThreadEvents> {
 
   setThinkingEnabled(enabled: boolean): void { this._thinkingEnabled = enabled; }
   setThinkingEffort(effort?: string): void { this._thinkingEffort = effort; }
+
+  /**
+   * Signal that the UI has a message queued for sending.
+   * This causes the current agentic turn to end at the next message boundary.
+   * Ported from: Thread::set_has_queued_message in thread.rs
+   */
+  setHasQueuedMessage(queued: boolean): void { this.hasQueuedMessage = queued; }
   setTitle(title: string): void {
     this._title = title;
     this.emit('title_updated', title);
@@ -705,6 +723,7 @@ export class Thread extends EventEmitter<ThreadEvents> {
       getFileReadTime(absPath: string) {
         return fileReadTimes.get(absPath);
       },
+      actionLog: this._actionLog,
     };
 
     // Run the tool
@@ -1525,6 +1544,12 @@ export interface ThreadOptions {
    * Ported from: use_streaming_edit_tool flag in thread.rs
    */
   useStreamingEditTool?: boolean;
+  /**
+   * Action log for tracking agent operations.
+   * If provided, tools will log their operations here.
+   * Ported from: action_log::ActionLog in Zed.
+   */
+  actionLog?: import('../utils/action-log.js').ActionLog;
 }
 
 // ---------------------------------------------------------------------------

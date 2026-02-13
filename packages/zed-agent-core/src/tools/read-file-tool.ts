@@ -107,6 +107,9 @@ export class ReadFileTool implements AgentTool<ReadFileToolInput, string> {
       context.recordFileRead(absPath, mtime);
     }
 
+    // Log the file read
+    context.actionLog?.fileRead(absPath);
+
     // Update tool call with location
     context.eventStream.updateFields({
       locations: [{ path: absPath, line: input.start_line ? input.start_line - 1 : undefined }],

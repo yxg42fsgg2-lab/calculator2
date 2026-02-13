@@ -130,6 +130,11 @@ export class EditFileTool implements AgentTool<EditFileToolInput, string> {
       locations: [{ path: absPath }],
     });
 
+    // Log the operation
+    if (input.mode === 'create') context.actionLog?.fileCreate(absPath);
+    else if (input.mode === 'edit') context.actionLog?.fileEdit(absPath, input.display_description);
+    else context.actionLog?.fileWrite(absPath, input.display_description);
+
     switch (input.mode) {
       case 'create':
         return this.createFile(input, absPath, context);

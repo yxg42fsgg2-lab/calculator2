@@ -85,6 +85,9 @@ export class TerminalTool implements AgentTool<TerminalToolInput, string> {
       );
     }
 
+    // Log the command
+    context.actionLog?.terminalCommand(input.command, workingDir);
+
     // Create terminal
     const terminal = await context.host.terminal.createTerminal({
       command: input.command,

@@ -143,6 +143,12 @@ export interface ToolContext {
    * Returns undefined if the file hasn't been read.
    */
   getFileReadTime?(absPath: string): number | undefined;
+  /**
+   * Action log for recording operations.
+   * Ported from: action_log::ActionLog in Zed.
+   * If provided, tools should log their operations here.
+   */
+  actionLog?: import('../utils/action-log.js').ActionLog;
 }
 
 /**

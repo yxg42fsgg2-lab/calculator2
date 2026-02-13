@@ -40,5 +40,11 @@ export * from './thread/index.js';
 // Re-export edit-agent
 export * from './edit-agent/index.js';
 
+// Re-export permissions
+export * from './permissions/index.js';
+
+// Re-export session
+export * from './session/index.js';
+
 // Re-export templates
 export * from './templates/index.js';

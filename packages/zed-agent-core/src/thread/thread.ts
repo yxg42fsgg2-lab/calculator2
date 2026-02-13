@@ -235,6 +235,9 @@ export class Thread extends EventEmitter<ThreadEvents> {
 
   // --- Token usage ---
 
+  /**
+   * Get the token usage for the latest request.
+   */
   latestTokenUsage(): AcpTokenUsage | null {
     const lastUserMsg = this.lastUserMessage();
     if (!lastUserMsg) return null;
@@ -246,6 +249,54 @@ export class Thread extends EventEmitter<ThreadEvents> {
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
     };
+  }
+
+  /**
+   * Get the token usage for a specific request (by user message ID).
+   */
+  getTokenUsageForMessage(messageId: UserMessageId): TokenUsage | undefined {
+    return this.requestTokenUsage.get(messageId);
+  }
+
+  /**
+   * Get the total input token count as of the message before the given message.
+   * Useful for showing how much of the context window is used at each point.
+   *
+   * Ported from: Thread::tokens_before_message() in thread.rs
+   *
+   * Returns undefined if:
+   * - targetId is the first message (no previous message)
+   * - The previous message hasn't received a response yet
+   * - targetId is not found
+   */
+  getTokensBeforeMessage(targetId: UserMessageId): number | undefined {
+    let previousUserMessageId: UserMessageId | undefined;
+
+    for (const message of this.messages) {
+      if (message.type === 'user') {
+        if (message.message.id === targetId) {
+          if (!previousUserMessageId) return undefined;
+          const usage = this.requestTokenUsage.get(previousUserMessageId);
+          return usage?.inputTokens;
+        }
+        previousUserMessageId = message.message.id;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Get the total accumulated token usage across all requests.
+   */
+  get totalTokenUsage(): TokenUsage {
+    return { ...this.cumulativeTokenUsage };
+  }
+
+  /**
+   * Get all per-request token usage entries.
+   */
+  get allTokenUsage(): ReadonlyMap<UserMessageId, TokenUsage> {
+    return this.requestTokenUsage;
   }
 
   // --- Send message ---

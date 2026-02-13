@@ -4,7 +4,7 @@
  */
 
 export { AgentSession, createAgentSession } from './agent-session.js';
-export type { AgentSessionOptions, AgentSessionEvents } from './agent-session.js';
+export type { AgentSessionOptions, AgentSessionEvents, EventMiddleware } from './agent-session.js';
 
 export {
   loadSettingsFromConfig,

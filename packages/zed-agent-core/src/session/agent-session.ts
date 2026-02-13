@@ -49,7 +49,27 @@ export interface AgentSessionOptions {
   databasePath?: string;
   /** Whether to auto-save threads after each turn. Default: true if databasePath is set. */
   autoSave?: boolean;
+  /**
+   * Event middleware — intercept and transform events before they reach the EventSink.
+   * Useful for logging, analytics, or filtering events.
+   *
+   * ```typescript
+   * middleware: [
+   *   (event) => { console.log('[agent]', event.type); return event; },
+   *   (event) => event.type === 'agent_thinking' ? null : event, // filter thinking
+   * ]
+   * ```
+   */
+  middleware?: EventMiddleware[];
 }
+
+/**
+ * Event middleware function.
+ * Receives an AgentEvent and returns:
+ * - The event (possibly modified) to pass through
+ * - null to suppress the event
+ */
+export type EventMiddleware = (event: import('../types/events.js').AgentEvent) => import('../types/events.js').AgentEvent | null;
 
 export interface AgentSessionEvents {
   /** Thread was created. */
@@ -89,7 +109,28 @@ export class AgentSession extends EventEmitter<AgentSessionEvents> {
 
   constructor(options: AgentSessionOptions) {
     super();
-    this.host = options.host;
+
+    // Wrap the host's event sink with middleware if provided
+    if (options.middleware && options.middleware.length > 0) {
+      const originalSink = options.host.events;
+      const middleware = options.middleware;
+      this.host = {
+        ...options.host,
+        events: {
+          emit(event) {
+            let current: import('../types/events.js').AgentEvent | null = event;
+            for (const mw of middleware) {
+              if (!current) break;
+              current = mw(current);
+            }
+            if (current) originalSink.emit(current);
+          },
+        },
+      };
+    } else {
+      this.host = options.host;
+    }
+
     this.model = options.model;
     this.registry = options.registry;
     this.settings = {

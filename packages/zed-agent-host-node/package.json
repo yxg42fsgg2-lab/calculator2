@@ -1,0 +1,21 @@
+{
+  "name": "@anthropic/zed-agent-host-node",
+  "version": "0.1.0",
+  "description": "Reference Node.js host implementation for zed-agent-core",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic/zed-agent-core": "*",
+    "fast-glob": "^3.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "license": "GPL-3.0-or-later"
+}

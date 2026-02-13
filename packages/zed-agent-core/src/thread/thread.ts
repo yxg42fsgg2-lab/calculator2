@@ -124,6 +124,7 @@ export class Thread extends EventEmitter<ThreadEvents> {
   private _pendingTitleGeneration = false;
   private _useStreamingEditTool = false;
   private _actionLog?: import('../utils/action-log.js').ActionLog;
+  private _rateLimiter?: import('../models/rate-limiter.js').RateLimiter;
 
   // External dependencies
   private host: BackendHost;
@@ -143,6 +144,7 @@ export class Thread extends EventEmitter<ThreadEvents> {
     this.systemPromptBuilder = options.systemPromptBuilder;
     this._useStreamingEditTool = options.useStreamingEditTool ?? false;
     this._actionLog = options.actionLog;
+    this._rateLimiter = options.rateLimiter;
 
     if (options.model?.supportsThinking) {
       this._thinkingEnabled = true;
@@ -474,6 +476,14 @@ export class Thread extends EventEmitter<ThreadEvents> {
       let completionError: CompletionError | null = null;
       let endTurn = true;
 
+      // Acquire rate limit permit before making the API call.
+      // Ported from: Zed drops the stream to release the rate limit permit before
+      // tool execution, preventing deadlocks when tools spawn subagents that need
+      // their own permits.
+      const releasePermit = this._rateLimiter
+        ? await this._rateLimiter.acquire()
+        : undefined;
+
       try {
         for await (const event of model.streamCompletion(request)) {
           if (signal.aborted) return 'cancelled';
@@ -493,6 +503,10 @@ export class Thread extends EventEmitter<ThreadEvents> {
             error instanceof Error ? error : undefined,
           );
         }
+      } finally {
+        // Release the rate limit permit before tool execution.
+        // This prevents deadlocks when tools spawn subagents that need permits.
+        releasePermit?.();
       }
 
       // Wait for all tool results in parallel
@@ -1550,6 +1564,14 @@ export interface ThreadOptions {
    * Ported from: action_log::ActionLog in Zed.
    */
   actionLog?: import('../utils/action-log.js').ActionLog;
+  /**
+   * Rate limiter for concurrent API requests.
+   * If provided, the Thread will acquire a permit before each model call
+   * and release it after the stream completes (before tool execution).
+   * This prevents flooding the API and avoids deadlocks with subagents.
+   * Ported from: Zed's semaphore-based rate limiting in the streaming path.
+   */
+  rateLimiter?: import('../models/rate-limiter.js').RateLimiter;
 }
 
 // ---------------------------------------------------------------------------

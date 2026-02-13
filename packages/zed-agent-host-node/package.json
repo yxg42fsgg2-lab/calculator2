@@ -19,5 +19,18 @@
     "typescript": "^5.5.0",
     "vitest": "^4.0.18"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "zed",
+    "agent",
+    "node",
+    "host",
+    "filesystem",
+    "terminal"
+  ],
   "license": "GPL-3.0-or-later"
 }

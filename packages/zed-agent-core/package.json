@@ -72,5 +72,26 @@
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "zed",
+    "agent",
+    "ai",
+    "coding",
+    "llm",
+    "tools",
+    "anthropic",
+    "openai",
+    "agentic"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zed-industries/zed",
+    "directory": "packages/zed-agent-core"
+  },
   "license": "GPL-3.0-or-later"
 }

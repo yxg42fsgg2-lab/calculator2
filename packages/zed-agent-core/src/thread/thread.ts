@@ -122,6 +122,7 @@ export class Thread extends EventEmitter<ThreadEvents> {
   private subagentContext?: SubagentContext;
   private fileReadTimes: Map<string, number> = new Map(); // path → mtime
   private _pendingTitleGeneration = false;
+  private _useStreamingEditTool = false;
 
   // External dependencies
   private host: BackendHost;
@@ -139,6 +140,7 @@ export class Thread extends EventEmitter<ThreadEvents> {
     this._thinkingEnabled = options.thinkingEnabled ?? false;
     this._thinkingEffort = options.thinkingEffort;
     this.systemPromptBuilder = options.systemPromptBuilder;
+    this._useStreamingEditTool = options.useStreamingEditTool ?? false;
 
     if (options.model?.supportsThinking) {
       this._thinkingEnabled = true;
@@ -778,21 +780,39 @@ export class Thread extends EventEmitter<ThreadEvents> {
    * Filters tools based on:
    * 1. Profile settings (is_tool_enabled)
    * 2. Provider support (supports_provider)
-   * 3. Name length (truncate > MAX_TOOL_NAME_LENGTH)
+   * 3. Edit tool swap (useStreamingEditTool option)
+   * 4. Name length (truncate > MAX_TOOL_NAME_LENGTH)
    */
   private getEnabledTools(model: LanguageModel): AnyAgentTool[] {
     const profile = this.settings.profiles.get(this.settings.defaultProfile);
+    // In Zed, this is a feature flag. We expose it as a Thread option.
+    const useStreamingEdit = this._useStreamingEditTool;
 
     return Array.from(this.tools.values()).filter((tool) => {
       // Check profile setting
-      if (profile && !profile.isToolEnabled(tool.name)) {
+      // For streaming_edit_file, check profile against "edit_file" since that's what users configure
+      const profileToolName = tool.name === 'streaming_edit_file' ? 'edit_file' : tool.name;
+      if (profile && !profile.isToolEnabled(profileToolName)) {
         return false;
       }
       // Check provider support
       if (tool.supportsProvider && !tool.supportsProvider(String(model.providerId))) {
         return false;
       }
+      // Edit tool swap logic (ported from thread.rs enabled_tools)
+      if (tool.name === 'edit_file' && useStreamingEdit) {
+        return false; // Exclude regular edit_file when streaming is preferred
+      }
+      if (tool.name === 'streaming_edit_file' && !useStreamingEdit) {
+        return false; // Exclude streaming when regular is preferred
+      }
       return true;
+    }).map((tool) => {
+      // When using streaming edit, expose it as "edit_file" (matching Zed's behavior)
+      if (tool.name === 'streaming_edit_file' && useStreamingEdit) {
+        return { ...tool, name: 'edit_file' };
+      }
+      return tool;
     });
   }
 
@@ -1437,6 +1457,13 @@ export interface ThreadOptions {
   thinkingEnabled?: boolean;
   thinkingEffort?: string;
   systemPromptBuilder?: (tools: string[], modelName?: string) => string;
+  /**
+   * Whether to use StreamingEditFileTool instead of EditFileTool.
+   * When true, the StreamingEditFileTool is exposed as "edit_file" and
+   * the regular EditFileTool is excluded.
+   * Ported from: use_streaming_edit_tool flag in thread.rs
+   */
+  useStreamingEditTool?: boolean;
 }
 
 // ---------------------------------------------------------------------------

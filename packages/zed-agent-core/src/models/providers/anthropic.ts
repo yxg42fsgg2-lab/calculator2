@@ -161,6 +161,36 @@ export class AnthropicLanguageModel implements LanguageModel {
   }
 
   /**
+   * Count tokens in a request using Anthropic's token counting API.
+   * Ported from: crates/language_models/src/provider/anthropic.rs count_tokens
+   */
+  async countTokens(request: LanguageModelRequest): Promise<number> {
+    const { systemPrompt, messages } = this.buildMessages(request);
+
+    try {
+      const result = await this.client.messages.countTokens({
+        model: this.modelDef.id,
+        system: systemPrompt,
+        messages,
+      });
+      return result.input_tokens;
+    } catch {
+      // Fall back to rough estimate: ~4 chars per token
+      let charCount = systemPrompt.length;
+      for (const msg of messages) {
+        if (typeof msg.content === 'string') {
+          charCount += msg.content.length;
+        } else if (Array.isArray(msg.content)) {
+          for (const block of msg.content) {
+            if ('text' in block) charCount += (block as { text: string }).text.length;
+          }
+        }
+      }
+      return Math.ceil(charCount / 4);
+    }
+  }
+
+  /**
    * Stream a completion from Anthropic.
    * Ported from: crates/anthropic/ streaming logic + crates/language_models/src/provider/anthropic.rs
    */

@@ -732,17 +732,25 @@ export class Thread extends EventEmitter<ThreadEvents> {
    * Build the completion request.
    * Ported from: Thread::build_completion_request()
    */
+  /**
+   * Build the completion request.
+   * Ported from: Thread::build_completion_request()
+   */
   private buildCompletionRequest(intent: CompletionIntent): LanguageModelRequest {
     const model = this._model;
     if (!model) throw new Error('No language model configured');
 
-    const toolDefs = Array.from(this.tools.values()).map((tool) => ({
+    // Get filtered tools for this turn
+    const enabledTools = this.getEnabledTools(model);
+
+    const toolDefs = enabledTools.map((tool) => ({
       name: tool.name,
       description: tool.description(),
       inputSchema: tool.inputSchema(model.toolInputFormat),
     }));
 
-    const messages = this.buildRequestMessages();
+    const toolNames = enabledTools.map((t) => t.name);
+    const messages = this.buildRequestMessages(toolNames);
 
     return {
       threadId: String(this.id),
@@ -757,11 +765,36 @@ export class Thread extends EventEmitter<ThreadEvents> {
   }
 
   /**
+   * Get the filtered list of tools for this turn.
+   * Ported from: Thread::enabled_tools() in thread.rs
+   *
+   * Filters tools based on:
+   * 1. Profile settings (is_tool_enabled)
+   * 2. Provider support (supports_provider)
+   * 3. Name length (truncate > MAX_TOOL_NAME_LENGTH)
+   */
+  private getEnabledTools(model: LanguageModel): AnyAgentTool[] {
+    const profile = this.settings.profiles.get(this.settings.defaultProfile);
+
+    return Array.from(this.tools.values()).filter((tool) => {
+      // Check profile setting
+      if (profile && !profile.isToolEnabled(tool.name)) {
+        return false;
+      }
+      // Check provider support
+      if (tool.supportsProvider && !tool.supportsProvider(String(model.providerId))) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  /**
    * Build request messages including system prompt.
    * Ported from: Thread::build_request_messages()
    */
-  private buildRequestMessages(): LanguageModelRequestMessage[] {
-    const toolNames = Array.from(this.tools.keys());
+  private buildRequestMessages(enabledToolNames?: string[]): LanguageModelRequestMessage[] {
+    const toolNames = enabledToolNames ?? Array.from(this.tools.keys());
     const modelName = this._model?.name;
 
     // Build system prompt

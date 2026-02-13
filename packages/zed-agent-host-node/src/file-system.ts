@@ -254,15 +254,70 @@ export class NodeFileSystem implements FileSystem {
       const paths = await fg.default(glob, {
         onlyFiles: true,
         dot: false,
+        ignore: [
+          '**/node_modules/**',
+          '**/.git/**',
+          '**/dist/**',
+          '**/build/**',
+          '**/__pycache__/**',
+          '**/target/**',
+          '**/.next/**',
+        ],
+        suppressErrors: true,
       });
+      paths.sort();
       const offset = options?.offset ?? 0;
       return {
         paths: paths.slice(offset),
         totalMatches: paths.length,
       };
     } catch {
-      return { paths: [], totalMatches: 0 };
+      // Fall back to simple recursive readdir + glob match
+      return this.findPathFallback(glob, options);
     }
+  }
+
+  /**
+   * Fallback findPath using recursive readdir when fast-glob is not available.
+   */
+  private async findPathFallback(glob: string, options?: FindPathOptions): Promise<FindPathResult> {
+    const matches: string[] = [];
+    const maxResults = 1000;
+
+    // Convert simple glob to regex
+    const regexStr = glob
+      .replace(/\*\*/g, '§DSTAR§')
+      .replace(/\*/g, '[^/]*')
+      .replace(/§DSTAR§/g, '.*')
+      .replace(/\?/g, '[^/]');
+    const regex = new RegExp(regexStr);
+
+    const walk = async (dir: string): Promise<void> => {
+      if (matches.length >= maxResults) return;
+      let entries: string[];
+      try { entries = await fs.readdir(dir); } catch { return; }
+
+      for (const name of entries) {
+        if (matches.length >= maxResults) break;
+        if (name === 'node_modules' || name === '.git' || name === 'dist' ||
+            name === '__pycache__' || name === 'target' || name === '.next') continue;
+
+        const full = path.join(dir, name);
+        let stat: Awaited<ReturnType<typeof fs.stat>>;
+        try { stat = await fs.stat(full); } catch { continue; }
+
+        if (stat.isDirectory()) {
+          await walk(full);
+        } else if (stat.isFile() && regex.test(full)) {
+          matches.push(full);
+        }
+      }
+    };
+
+    await walk(process.cwd());
+    matches.sort();
+    const offset = options?.offset ?? 0;
+    return { paths: matches.slice(offset), totalMatches: matches.length };
   }
 
   async getFileOutline(filePath: string): Promise<FileOutline | null> {

@@ -45,3 +45,24 @@ export type {
   OpenAICompatibleProviderOptions,
   OpenAICompatibleModelDef,
 } from './openai-compatible.js';
+
+// GitHub Copilot Chat
+export {
+  createCopilotProvider,
+  COPILOT_PROVIDER_ID,
+  COPILOT_PROVIDER_NAME,
+} from './copilot.js';
+
+// AWS Bedrock
+export {
+  createBedrockProvider,
+  BEDROCK_PROVIDER_ID,
+  BEDROCK_PROVIDER_NAME,
+} from './bedrock.js';
+
+// Vercel AI
+export {
+  createVercelProvider,
+  VERCEL_PROVIDER_ID,
+  VERCEL_PROVIDER_NAME,
+} from './vercel.js';

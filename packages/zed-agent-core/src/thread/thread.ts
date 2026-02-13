@@ -1264,16 +1264,36 @@ export class Thread extends EventEmitter<ThreadEvents> {
   /**
    * Restore a thread from a DbThread.
    * Ported from: Thread::from_db() in thread.rs
+   *
+   * Model resolution order:
+   * 1. Try to resolve the saved model from registry (if provided)
+   * 2. Fall back to options.model
+   * 3. Fall back to no model (user must set one before sending)
    */
   static fromDb(
     id: SessionId,
     dbThread: DbThread,
-    options: ThreadOptions,
+    options: ThreadOptions & {
+      registry?: import('../models/registry.js').LanguageModelRegistry;
+    },
   ): Thread {
+    // Try to resolve the saved model from registry
+    let model = options.model;
+    if (dbThread.model && options.registry) {
+      const resolved = options.registry.selectModel({
+        provider: dbThread.model.provider,
+        model: dbThread.model.model,
+      });
+      if (resolved) {
+        model = resolved.model;
+      }
+    }
+
     const thread = new Thread({
       ...options,
       id,
-      thinkingEnabled: options.model?.supportsThinking ?? false,
+      model,
+      thinkingEnabled: model?.supportsThinking ?? false,
     });
     thread._title = dbThread.title || undefined;
     thread._summary = dbThread.detailedSummary;

@@ -779,17 +779,100 @@ export class Thread extends EventEmitter<ThreadEvents> {
     }
   }
 
+  /**
+   * Convert a user message to request format with context tag grouping.
+   * Ported from: UserMessage::to_request() in thread.rs
+   *
+   * Mentions are grouped by type into XML context tags:
+   * <context>
+   *   <files>...</files>
+   *   <directories>...</directories>
+   *   <symbols>...</symbols>
+   *   <selections>...</selections>
+   *   <threads>...</threads>
+   *   <fetched_urls>...</fetched_urls>
+   *   <rules>...</rules>
+   *   <diagnostics>...</diagnostics>
+   * </context>
+   */
   private userMessageToRequest(msg: UserMessage): LanguageModelRequestMessage {
-    const content = msg.content.map((c) => {
+    const content: import('../types/language-model.js').MessageContent[] = [];
+
+    // Context accumulators (same pattern as Zed)
+    const OPEN_CONTEXT = '<context>\nThe following items were attached by the user. They are up-to-date and don\'t need to be re-read.\n\n';
+    let fileContext = '';
+    let directoryContext = '';
+    let symbolContext = '';
+    let selectionContext = '';
+    let threadContext = '';
+    let fetchContext = '';
+    let rulesContext = '';
+    let diagnosticsContext = '';
+
+    for (const c of msg.content) {
       switch (c.type) {
         case 'text':
-          return { type: 'text' as const, text: c.text };
+          content.push({ type: 'text', text: c.text });
+          break;
         case 'image':
-          return { type: 'image' as const, image: c.image };
-        case 'mention':
-          return { type: 'text' as const, text: c.content };
+          content.push({ type: 'image', image: c.image });
+          break;
+        case 'mention': {
+          const { uri, content: mentionContent } = c;
+          // Add a link reference in the main content
+          content.push({ type: 'text', text: mentionUriAsLink(uri) });
+
+          // Route mention content to the appropriate context group
+          switch (uri.type) {
+            case 'file':
+              fileContext += `\n\`\`\`${codeblockTag(uri.absPath)}\n${mentionContent}\n\`\`\`\n`;
+              break;
+            case 'directory':
+              directoryContext += `\n${mentionContent}\n`;
+              break;
+            case 'symbol':
+              symbolContext += `\n\`\`\`${codeblockTag(uri.absPath, [uri.lineRange[0], uri.lineRange[1]])}\n${mentionContent}\n\`\`\`\n`;
+              break;
+            case 'selection':
+              selectionContext += `\n\`\`\`${codeblockTag(uri.absPath ?? 'Untitled', [uri.lineRange[0], uri.lineRange[1]])}\n${mentionContent}\n\`\`\`\n`;
+              break;
+            case 'thread':
+            case 'text_thread':
+              threadContext += `\n${mentionContent}\n`;
+              break;
+            case 'rule':
+              rulesContext += `\n\`\`\`\n${mentionContent}\n\`\`\`\n`;
+              break;
+            case 'fetch':
+              fetchContext += `\nFetch: ${uri.url}\n\n${mentionContent}`;
+              break;
+            case 'diagnostics':
+              diagnosticsContext += `\n${mentionContent}\n`;
+              break;
+            case 'terminal_selection':
+              selectionContext += `\n\`\`\`console\n${mentionContent}\n\`\`\`\n`;
+              break;
+          }
+          break;
+        }
       }
-    });
+    }
+
+    // Append context groups if they have content
+    const contextParts: string[] = [];
+    if (fileContext) contextParts.push(`<files>${fileContext}</files>`);
+    if (directoryContext) contextParts.push(`<directories>${directoryContext}</directories>`);
+    if (symbolContext) contextParts.push(`<symbols>${symbolContext}</symbols>`);
+    if (selectionContext) contextParts.push(`<selections>${selectionContext}</selections>`);
+    if (threadContext) contextParts.push(`<threads>${threadContext}</threads>`);
+    if (fetchContext) contextParts.push(`<fetched_urls>${fetchContext}</fetched_urls>`);
+    if (rulesContext) contextParts.push(`<rules>\nThe user has specified the following rules that should be applied:\n${rulesContext}</rules>`);
+    if (diagnosticsContext) contextParts.push(`<diagnostics>${diagnosticsContext}</diagnostics>`);
+
+    if (contextParts.length > 0) {
+      content.push({ type: 'text', text: OPEN_CONTEXT + contextParts.join('\n') + '\n</context>' });
+    }
+
     return { role: 'user', content, cache: false };
   }
 
@@ -1353,4 +1436,59 @@ function retryStrategyFor(error: CompletionError): RetryStrategyResult | null {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------------
+// Context tag helpers — ported from thread.rs
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a code block tag with optional line range.
+ * Ported from: codeblock_tag() in thread.rs
+ */
+function codeblockTag(fullPath: string, lineRange?: [number, number]): string {
+  let result = '';
+  const ext = fullPath.split('.').pop();
+  if (ext && ext !== fullPath) {
+    result += `${ext} `;
+  }
+  result += fullPath;
+  if (lineRange) {
+    if (lineRange[0] === lineRange[1]) {
+      result += `:${lineRange[0] + 1}`;
+    } else {
+      result += `:${lineRange[0] + 1}-${lineRange[1] + 1}`;
+    }
+  }
+  return result;
+}
+
+/**
+ * Convert a MentionUri to a link string.
+ * Ported from: MentionUri::as_link() in mention.rs
+ */
+function mentionUriAsLink(uri: import('../types/thread.js').MentionUri): string {
+  switch (uri.type) {
+    case 'file':
+      return `[@${uri.absPath.split('/').pop() ?? uri.absPath}](file://${uri.absPath})`;
+    case 'directory':
+      return `[@${uri.absPath.split('/').pop() ?? uri.absPath}](file://${uri.absPath})`;
+    case 'symbol':
+      return `[@${uri.symbolName}](symbol://${uri.absPath}#${uri.lineRange[0]}-${uri.lineRange[1]})`;
+    case 'selection':
+      return `[@selection](selection://${uri.absPath ?? 'untitled'}#${uri.lineRange[0]}-${uri.lineRange[1]})`;
+    case 'thread':
+    case 'text_thread':
+      return `[@thread](thread://${uri.sessionId})`;
+    case 'rule':
+      return `[@rule](rule://${uri.id})`;
+    case 'fetch':
+      return `[@${uri.url}](${uri.url})`;
+    case 'diagnostics':
+      return `[@diagnostics](diagnostics://${uri.absPath ?? 'all'})`;
+    case 'terminal_selection':
+      return `[@terminal](terminal://${uri.terminalId})`;
+    case 'pasted_image':
+      return '[image]';
+  }
 }

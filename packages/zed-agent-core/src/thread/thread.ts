@@ -68,6 +68,7 @@ import type {
 import type { AgentEvent } from '../types/events.js';
 import type { BackendHost, EventSink } from '../types/host.js';
 import type { AgentSettings, AgentProfileSettings } from '../types/settings.js';
+import { SUMMARIZE_THREAD_PROMPT, SUMMARIZE_THREAD_DETAILED_PROMPT } from '../types/settings.js';
 import {
   CompletionError,
   PromptTooLargeError,
@@ -119,6 +120,7 @@ export class Thread extends EventEmitter<ThreadEvents> {
   private hasQueuedMessage = false;
   private subagentContext?: SubagentContext;
   private fileReadTimes: Map<string, number> = new Map(); // path → mtime
+  private _pendingTitleGeneration = false;
 
   // External dependencies
   private host: BackendHost;
@@ -912,21 +914,123 @@ export class Thread extends EventEmitter<ThreadEvents> {
     this.emit('event', event);
   }
 
-  private generateTitleIfNeeded(model: LanguageModel): void {
-    // Title generation is async and non-blocking
-    // Will be fully implemented with summarization model support
-    if (this._title || this.messages.length === 0) return;
-    // Placeholder: use first user message as title
-    const firstUser = this.messages.find((m) => m.type === 'user');
-    if (firstUser && firstUser.type === 'user') {
-      const text = firstUser.message.content
-        .filter((c) => c.type === 'text')
-        .map((c) => (c as { type: 'text'; text: string }).text)
-        .join(' ');
-      if (text.length > 0) {
-        this._title = text.length > 50 ? text.slice(0, 50) + '...' : text;
-        this.emit('title_updated', this._title);
+  /**
+   * Generate a title for this thread via the summarization model.
+   * Ported from: Thread::generate_title() in thread.rs
+   *
+   * Uses the summarization model (or falls back to the primary model) to
+   * generate a concise title. Runs asynchronously and non-blocking.
+   */
+  private generateTitleIfNeeded(_model: LanguageModel): void {
+    if (this._title || this.messages.length === 0 || this._pendingTitleGeneration) return;
+
+    const summaryModel = this._summarizationModel ?? this._model;
+    if (!summaryModel) return;
+
+    this._pendingTitleGeneration = true;
+
+    // Build the title generation request from message history
+    const requestMessages: LanguageModelRequestMessage[] = [];
+    for (const msg of this.messages) {
+      const reqMsgs = this.messageToRequest(msg);
+      requestMessages.push(...reqMsgs);
+    }
+
+    // Add the summarization prompt
+    requestMessages.push({
+      role: 'user',
+      content: [{ type: 'text', text: SUMMARIZE_THREAD_PROMPT }],
+      cache: false,
+    });
+
+    const request: LanguageModelRequest = {
+      messages: requestMessages,
+      tools: [],
+      temperature: 0.3,
+    };
+
+    // Fire and forget — title generation is non-blocking
+    (async () => {
+      try {
+        let title = '';
+        for await (const event of summaryModel.streamCompletion(request)) {
+          if (event.type === 'text') {
+            title += event.text;
+            // Stop at first newline (title should be one line)
+            if (title.includes('\n')) {
+              title = title.split('\n')[0]!;
+              break;
+            }
+          }
+        }
+        title = title.trim();
+        if (title.length > 0 && !this._title) {
+          this._title = title;
+          this.emit('title_updated', title);
+          this.emitEvent({
+            type: 'title_updated',
+            sessionId: this.id,
+            title,
+          });
+        }
+      } catch (err) {
+        // Title generation failure is non-fatal — fall back to first message
+        const firstUser = this.messages.find((m) => m.type === 'user');
+        if (firstUser && firstUser.type === 'user' && !this._title) {
+          const text = firstUser.message.content
+            .filter((c) => c.type === 'text')
+            .map((c) => (c as { type: 'text'; text: string }).text)
+            .join(' ');
+          if (text.length > 0) {
+            this._title = text.length > 50 ? text.slice(0, 50) + '...' : text;
+            this.emit('title_updated', this._title);
+          }
+        }
+      } finally {
+        this._pendingTitleGeneration = false;
       }
+    })();
+  }
+
+  /**
+   * Generate a detailed summary of the thread.
+   * Ported from: Thread::summary() in thread.rs
+   */
+  async generateSummary(): Promise<string | null> {
+    const model = this._summarizationModel ?? this._model;
+    if (!model) return null;
+    if (this._summary) return this._summary;
+
+    const requestMessages: LanguageModelRequestMessage[] = [];
+    for (const msg of this.messages) {
+      requestMessages.push(...this.messageToRequest(msg));
+    }
+    requestMessages.push({
+      role: 'user',
+      content: [{ type: 'text', text: SUMMARIZE_THREAD_DETAILED_PROMPT }],
+      cache: false,
+    });
+
+    const request: LanguageModelRequest = {
+      messages: requestMessages,
+      tools: [],
+      temperature: 0.3,
+    };
+
+    try {
+      let summary = '';
+      for await (const event of model.streamCompletion(request)) {
+        if (event.type === 'text') {
+          summary += event.text;
+        }
+      }
+      summary = summary.trim();
+      if (summary.length > 0) {
+        this._summary = summary;
+      }
+      return this._summary ?? null;
+    } catch {
+      return null;
     }
   }
 

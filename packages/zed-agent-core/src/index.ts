@@ -36,3 +36,6 @@ export * from './tools/index.js';
 
 // Re-export thread
 export * from './thread/index.js';
+
+// Re-export templates
+export * from './templates/index.js';

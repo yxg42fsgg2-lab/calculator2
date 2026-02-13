@@ -450,7 +450,9 @@ export class Thread extends EventEmitter<ThreadEvents> {
       const request = this.buildCompletionRequest(intent);
 
       // Stream completion
-      const toolResults: LanguageModelToolResult[] = [];
+      // Tool results run in parallel (matching Zed's FuturesUnordered behavior).
+      // We collect promises during streaming and await them all after the stream ends.
+      const toolResultPromises: Promise<LanguageModelToolResult>[] = [];
       let completionError: CompletionError | null = null;
       let endTurn = true;
 
@@ -458,26 +460,10 @@ export class Thread extends EventEmitter<ThreadEvents> {
         for await (const event of model.streamCompletion(request)) {
           if (signal.aborted) return 'cancelled';
 
-          const toolResult = this.handleCompletionEvent(event, signal);
-          if (toolResult) {
+          const toolResultPromise = this.handleCompletionEvent(event, signal);
+          if (toolResultPromise) {
             endTurn = false;
-            // Run tool in background and collect result
-            const result = await toolResult;
-            toolResults.push(result);
-
-            // Update tool call status
-            this.emitEvent({
-              type: 'tool_call_update',
-              toolCallId: result.toolUseId as unknown as import('../types/branded.js').ToolCallId,
-              fields: {
-                status: result.isError ? 'failed' : 'completed',
-                rawOutput: result.output,
-              },
-            });
-
-            // Add to pending message
-            const pending = this.getPendingMessage();
-            pending.toolResults.set(result.toolUseId, result);
+            toolResultPromises.push(toolResultPromise);
           }
         }
       } catch (error) {
@@ -488,6 +474,30 @@ export class Thread extends EventEmitter<ThreadEvents> {
             error instanceof Error ? error.message : String(error),
             error instanceof Error ? error : undefined,
           );
+        }
+      }
+
+      // Wait for all tool results in parallel
+      // Ported from: Zed's FuturesUnordered which polls all tool futures concurrently
+      const toolResults: LanguageModelToolResult[] = [];
+      if (toolResultPromises.length > 0) {
+        const results = await Promise.all(toolResultPromises);
+        for (const result of results) {
+          toolResults.push(result);
+
+          // Update tool call status
+          this.emitEvent({
+            type: 'tool_call_update',
+            toolCallId: result.toolUseId as unknown as import('../types/branded.js').ToolCallId,
+            fields: {
+              status: result.isError ? 'failed' : 'completed',
+              rawOutput: result.output,
+            },
+          });
+
+          // Add to pending message
+          const pending = this.getPendingMessage();
+          pending.toolResults.set(result.toolUseId, result);
         }
       }
 

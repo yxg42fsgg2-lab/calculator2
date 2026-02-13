@@ -49,5 +49,8 @@ export * from './session/index.js';
 // Re-export persistence
 export * from './persistence/index.js';
 
+// Re-export utils
+export * from './utils/index.js';
+
 // Re-export templates
 export * from './templates/index.js';

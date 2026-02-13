@@ -5,6 +5,7 @@
 
 import type { AgentTool, AgentToolOutput, ToolContext, ToolKind } from '../types/tools.js';
 import { textToolResult, imageToolResult } from '../types/language-model.js';
+import { markdownCodeBlock } from '../utils/markdown.js';
 
 export interface ReadFileToolInput {
   /** The relative path of the file to read. */
@@ -132,11 +133,11 @@ export class ReadFileTool implements AgentTool<ReadFileToolInput, string> {
 
       const content = await fs.readFileRange(absPath, startLine, endLine);
 
-      // Update tool call with content display
+      // Update tool call with content display (Zed path-based code block format)
       context.eventStream.updateFields({
         content: [{
           type: 'content',
-          content: `\`\`\`${input.path}\n${content}\`\`\``,
+          content: markdownCodeBlock(input.path, content),
         }],
       });
 
@@ -147,7 +148,6 @@ export class ReadFileTool implements AgentTool<ReadFileToolInput, string> {
     }
 
     // No line range — check file size for outline fallback
-    const fileSize = await fs.getFileSize(absPath);
     const content = await fs.readFile(absPath);
 
     if (content.length > MAX_FILE_SIZE_FOR_INLINE) {
@@ -170,11 +170,11 @@ export class ReadFileTool implements AgentTool<ReadFileToolInput, string> {
       }
     }
 
-    // Return full content
+    // Return full content (Zed path-based code block format)
     context.eventStream.updateFields({
       content: [{
         type: 'content',
-        content: `\`\`\`${input.path}\n${content}\`\`\``,
+        content: markdownCodeBlock(input.path, content),
       }],
     });
 
